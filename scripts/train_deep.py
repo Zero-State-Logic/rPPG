@@ -64,7 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--data-type", default="Standardized",
                     choices=["Standardized", "DiffNormalized"])
     ap.add_argument("--fps", type=float, default=30.0)
-    ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--workers", type=int, default=0,
+                    help="DataLoader workers; 0 avoids OpenCV fork crashes on Colab")
     ap.add_argument("--out-dir", default="artifacts/models")
     ap.add_argument("--seed", type=int, default=42)
     return ap
@@ -72,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    import cv2  # OpenCV is not fork-safe; disable its threads to avoid heap
+    cv2.setNumThreads(0)  # corruption ("free(): invalid next size") in loaders
     torch.manual_seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"[setup] device={device} model={args.model} "
