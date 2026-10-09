@@ -13,3 +13,4 @@ third_party/rPPG-Toolbox/
 .ipynb_checkpoints/
 .env
 .DS_Store
+*.egg-info/
