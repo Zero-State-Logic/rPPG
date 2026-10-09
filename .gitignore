@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+data/
+artifacts/
+third_party/rPPG-Toolbox/
+*.mp4
+*.avi
+*.mov
+*.npy
+*.npz
+.ipynb_checkpoints/
+.env
+.DS_Store

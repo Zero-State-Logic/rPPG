@@ -1,0 +1,34 @@
+Metadata-Version: 2.4
+Name: rppg
+Version: 0.1.0
+Summary: Research-grade remote photoplethysmography: heart rate and blood pressure from face video.
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: numpy>=1.24
+Requires-Dist: scipy>=1.10
+Requires-Dist: opencv-python>=4.8
+Requires-Dist: mediapipe>=0.10
+Requires-Dist: pandas>=2.0
+Requires-Dist: scikit-learn>=1.3
+Requires-Dist: neurokit2>=0.2
+Requires-Dist: PyYAML>=6.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: pytest-cov>=5; extra == "dev"
+Requires-Dist: ruff>=0.6; extra == "dev"
+
+# RPPG - Remote Vital Signs (HR + BP) from Face Video
+
+Research-grade remote photoplethysmography: estimate heart rate and blood pressure from
+facial video. Extends the ProPOS long-distance method with trained deep models, a rigorous
+blood-pressure pipeline, and robustness to camera distance and subject motion.
+
+- Plan: see PLAN.md
+- Live status / task board: docs/STATUS.md
+
+## Dev setup (Windows, Python 3.11)
+    py -3.11 -m venv .venv
+    .venv\\Scripts\\activate
+    pip install -r requirements-classical.txt
+
+Deep-model training runs on cloud GPUs (Colab/Kaggle); this machine is dev + classical only.
