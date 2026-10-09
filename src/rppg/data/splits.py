@@ -97,6 +97,11 @@ def subject_independent_split(
     n_total = len(shuffled)
     n_test = int(n_total * test_frac)
     n_val = int(n_total * val_frac)
+    if n_total >= 3:  # guarantee non-empty held-out splits for small pools
+        n_test = max(1, n_test)
+        n_val = max(1, n_val)
+        if n_test + n_val > n_total - 1:  # but always keep >=1 for train
+            n_val = n_total - 1 - n_test
 
     test_ids = shuffled[:n_test]
     val_ids = shuffled[n_test:n_test + n_val]
