@@ -1,9 +1,9 @@
-.venv/
+﻿.venv/
 __pycache__/
 *.pyc
 *.pyo
-data/
-artifacts/
+/data/
+/artifacts/
 third_party/rPPG-Toolbox/
 *.mp4
 *.avi
