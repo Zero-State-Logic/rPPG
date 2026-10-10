@@ -20,6 +20,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pathlib
 import shutil
@@ -28,10 +29,43 @@ import sys
 
 _MIN_VIDEO_BYTES = 1_000_000  # a real vid.avi is tens/hundreds of MB; tiny == bad
 
+# Where a user-provided kaggle.json commonly lands (Colab Files upload, HOME, cwd).
+_KAGGLE_JSON_CANDIDATES = (
+    pathlib.Path.home() / ".kaggle" / "kaggle.json",
+    pathlib.Path("/content/kaggle.json"),
+    pathlib.Path("kaggle.json"),
+)
 
-def _have_creds() -> bool:
-    """True when both Kaggle API env vars are present and non-empty."""
-    return bool(os.environ.get("KAGGLE_USERNAME") and os.environ.get("KAGGLE_KEY"))
+
+def _load_creds() -> bool:
+    """Ensure KAGGLE_USERNAME/KAGGLE_KEY are set, sourcing a kaggle.json if needed.
+
+    Checks the environment first, then any common kaggle.json location. When a
+    file is found it exports the two env vars and also installs the file at
+    ``~/.kaggle/kaggle.json`` with 0600 perms (what the kaggle CLI expects).
+    """
+    if os.environ.get("KAGGLE_USERNAME") and os.environ.get("KAGGLE_KEY"):
+        return True
+    for cand in _KAGGLE_JSON_CANDIDATES:
+        if not cand.exists():
+            continue
+        try:
+            data = json.loads(cand.read_text(encoding="utf-8"))
+            os.environ["KAGGLE_USERNAME"] = str(data["username"])
+            os.environ["KAGGLE_KEY"] = str(data["key"])
+        except Exception:  # noqa: BLE001 - malformed file -> try the next candidate
+            continue
+        home_kaggle = pathlib.Path.home() / ".kaggle"
+        home_kaggle.mkdir(parents=True, exist_ok=True)
+        dest = home_kaggle / "kaggle.json"
+        if dest.resolve() != cand.resolve():
+            dest.write_text(cand.read_text(encoding="utf-8"), encoding="utf-8")
+        try:
+            dest.chmod(0o600)
+        except OSError:
+            pass
+        return True
+    return False
 
 
 def _ensure_kaggle_installed() -> None:
@@ -89,9 +123,9 @@ def main() -> None:
     ap.add_argument("--raw", default="data/_ubfc_raw", help="raw download dir")
     args = ap.parse_args()
 
-    if not _have_creds():
-        sys.exit("No Kaggle credentials. Set KAGGLE_USERNAME and KAGGLE_KEY "
-                 "first (Colab: os.environ[...] = userdata.get(...)).")
+    if not _load_creds():
+        sys.exit("No Kaggle credentials. Upload kaggle.json to /content/ (Colab "
+                 "Files panel) or set KAGGLE_USERNAME and KAGGLE_KEY in the env.")
 
     _ensure_kaggle_installed()
     raw_dir, out_dir = pathlib.Path(args.raw), pathlib.Path(args.out)
