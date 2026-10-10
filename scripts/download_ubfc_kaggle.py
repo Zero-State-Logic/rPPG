@@ -44,6 +44,15 @@ def _load_creds() -> bool:
     file is found it exports the two env vars and also installs the file at
     ``~/.kaggle/kaggle.json`` with 0600 perms (what the kaggle CLI expects).
     """
+    # Newer Kaggle "KGAT_" API tokens: KAGGLE_API_TOKEN env or ~/.kaggle/access_token.
+    if os.environ.get("KAGGLE_API_TOKEN"):
+        return True
+    token_file = pathlib.Path.home() / ".kaggle" / "access_token"
+    if token_file.exists():
+        tok = token_file.read_text(encoding="utf-8").strip()
+        if tok:
+            os.environ["KAGGLE_API_TOKEN"] = tok  # bridge file -> env for the CLI
+            return True
     if os.environ.get("KAGGLE_USERNAME") and os.environ.get("KAGGLE_KEY"):
         return True
     for cand in _KAGGLE_JSON_CANDIDATES:
@@ -69,13 +78,9 @@ def _load_creds() -> bool:
 
 
 def _ensure_kaggle_installed() -> None:
-    """Install the kaggle CLI into the current interpreter if it is missing."""
-    try:
-        import kaggle  # noqa: F401
-        return
-    except Exception:  # noqa: BLE001 - any import failure -> install
-        subprocess.run([sys.executable, "-m", "pip", "install", "-q", "kaggle"],
-                       check=True)
+    """Install/upgrade the kaggle CLI (upgrade needed for KGAT_ API tokens)."""
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-U", "kaggle"],
+                   check=True)
 
 
 def _download(slug: str, raw_dir: pathlib.Path) -> None:
@@ -124,8 +129,9 @@ def main() -> None:
     args = ap.parse_args()
 
     if not _load_creds():
-        sys.exit("No Kaggle credentials. Upload kaggle.json to /content/ (Colab "
-                 "Files panel) or set KAGGLE_USERNAME and KAGGLE_KEY in the env.")
+        sys.exit("No Kaggle credentials. Set KAGGLE_API_TOKEN (KGAT_ token), or "
+                 "upload kaggle.json to /content/, or set KAGGLE_USERNAME + "
+                 "KAGGLE_KEY in the env.")
 
     _ensure_kaggle_installed()
     raw_dir, out_dir = pathlib.Path(args.raw), pathlib.Path(args.out)
