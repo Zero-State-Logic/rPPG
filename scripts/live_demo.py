@@ -115,6 +115,13 @@ def main() -> None:
     if not cap.isOpened():
         sys.exit(f"Could not open camera {args.camera}. Try --camera 1.")
 
+    fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+    print(f"[camera] {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x"
+          f"{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))} "
+          f"fourcc={''.join(chr((fourcc >> 8 * i) & 0xFF) for i in range(4))} "
+          f"reported_fps={cap.get(cv2.CAP_PROP_FPS):.0f}  "
+          f"(low light forces long exposure -> low FPS; use bright, white light)")
+
     detector = YuNetDetector()
     tracker = CentroidTracker()
     bank = SignalBank()
