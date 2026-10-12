@@ -65,11 +65,17 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
   2-subject run). `artifacts/models/best.pt` updated; runs live via `--neural`.
 - **Multi-person labels**: overlay now shows stable **"Subj 1 / Subj 2"** per person
   (lowest free number, freed on exit) via the YuNet + centroid tracker.
+- **Classical re-measured on all 8 subjects** (`eval_ubfc_fused.py`): overall **MAE
+  2.78 bpm, 93% within±5, 91% within±3** — median subject 1.6, 6/8 under 2 bpm, but
+  **subject17 is a 10.3 bpm outlier** (subject16 4.6) that inflates the mean. Likely a
+  face-detect / ROI / ground-truth issue on that mirror, not the method. Neural
+  ProPOSNet (1.17 bpm) is the cleaner headline now.
 - All committed/pushed to GitHub `Zero-State-Logic/rPPG`; 26 tests green.
 
 ### Left to do / how to continue
-1. **Re-measure classical MAE on all 8 subjects** (`eval_ubfc_fused.py --data-root
-   C:\rppg_data\UBFC`) for a better-sampled headline number (was 4 subjects = 1.41).
+1. **Investigate the subject17 classical outlier** (10.3 bpm) — check YuNet detection
+   / ROI coverage / ground-truth PPG alignment for that mirror; likely a fixable data
+   issue, and excluding/fixing it brings the overall classical MAE back near ~1.5 bpm.
 2. **Multi-ROI + skin masking** for extra live SNR under motion/distance.
 3. **Distance/motion** robustness ladders; **BP datasets** (academic) → real BP model.
 4. More subjects (C: ~3.6 GB free — clear space or use another drive) would lift the

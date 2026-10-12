@@ -34,7 +34,7 @@ fusion, a live system) toward our own paper.
 | Live webcam HR, 1 person | **Working** | Classical ProPOS + POS/CHROM fusion + HR tracker. |
 | Live webcam HR, multiple people | **Working** | YuNet multi-face + per-person tracker. |
 | Near/far, moving | **Working, degrades honestly** | Quality label drops; HR holds through motion. |
-| HR accuracy | **Real UBFC: 1.41 bpm MAE** (95% within±5, 93% within±3) | Measured on 4 subjects; synthetic 0.20 bpm. ≤3 bpm target **met**. |
+| HR accuracy | **Neural 1.17 bpm**; classical 8-subj **2.78 bpm, 93% within±5** (median 1.6; subj17 outlier 10.3) | 6/8 classical subjects <2 bpm; neural (held-out) is tighter. |
 | Harmonic/jump robustness | **Fixed** | HRTracker rejects 2× harmonic + spikes, holds through motion. |
 | Blood pressure | **Experimental only** | Heuristic + single-point calibration. NOT validated. |
 | Neural model (ProPOSNet) | **Real UBFC: 1.17 bpm MAE** (Pearson 0.95), **live** | Trained on 8 real subjects; runs live via `--neural`; beats classical 1.41. |
