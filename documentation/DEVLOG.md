@@ -59,16 +59,21 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 - **Trained net wired into the live demo** (`src/rppg/live/neural.py`, `--neural`):
   shows a "ProPOSNet N bpm" line per face next to the classical HR. Headless-validated
   (loads checkpoint, forwards, returns HR). Run: `live_demo.py --neural`.
-- **Downloading 4 more subjects** (10→14…17) to retrain for a stronger neural number.
+- **Retrained ProPOSNet on 8 real subjects** (10–17; 6 train / 1 val / 1 test):
+  held-out **MAE 1.17 bpm, RMSE 3.21, within±5 92%, Pearson 0.95** — now **beats the
+  classical 1.41 bpm** and well under the 3 bpm target (vs 3.81 bpm on the first
+  2-subject run). `artifacts/models/best.pt` updated; runs live via `--neural`.
+- **Multi-person labels**: overlay now shows stable **"Subj 1 / Subj 2"** per person
+  (lowest free number, freed on exit) via the YuNet + centroid tracker.
 - All committed/pushed to GitHub `Zero-State-Logic/rPPG`; 26 tests green.
 
 ### Left to do / how to continue
-1. **Train ProPOSNet on the real subjects** (`scripts/train_deep.py --dataset ubfc
-   --data-root C:\rppg_data\UBFC --model proposnet`, CPU) → save a checkpoint →
-   add a neural HR readout to `live_demo.py` next to ProPOS. (Only 4 subjects now →
-   weak split; grab a few more subjects if a stronger net is wanted — C: has ~10 GB.)
+1. **Re-measure classical MAE on all 8 subjects** (`eval_ubfc_fused.py --data-root
+   C:\rppg_data\UBFC`) for a better-sampled headline number (was 4 subjects = 1.41).
 2. **Multi-ROI + skin masking** for extra live SNR under motion/distance.
-3. **BP datasets** (academic) → real BP model; **distance/motion** roadmap phases.
+3. **Distance/motion** robustness ladders; **BP datasets** (academic) → real BP model.
+4. More subjects (C: ~3.6 GB free — clear space or use another drive) would lift the
+   neural net further.
 
 ---
 

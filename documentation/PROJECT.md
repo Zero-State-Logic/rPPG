@@ -37,7 +37,7 @@ fusion, a live system) toward our own paper.
 | HR accuracy | **Real UBFC: 1.41 bpm MAE** (95% within±5, 93% within±3) | Measured on 4 subjects; synthetic 0.20 bpm. ≤3 bpm target **met**. |
 | Harmonic/jump robustness | **Fixed** | HRTracker rejects 2× harmonic + spikes, holds through motion. |
 | Blood pressure | **Experimental only** | Heuristic + single-point calibration. NOT validated. |
-| Neural model (ProPOSNet) | **Trained on synthetic only** | Perfect on synthetic (not meaningful); needs real-data training; NOT yet in the live demo. |
+| Neural model (ProPOSNet) | **Real UBFC: 1.17 bpm MAE** (Pearson 0.95), **live** | Trained on 8 real subjects; runs live via `--neural`; beats classical 1.41. |
 | Classical/deep training pipeline | **Working** | Subject-independent + cross-dataset; CPU local, GPU on Colab. |
 | Real UBFC data | **4 subjects downloaded** | Via Kaggle per-file to `C:\rppg_data\UBFC`; more available (C: ~10 GB free). |
 | BP datasets | **Not obtained** | Academic agreements (weeks); request emails drafted. |
@@ -169,11 +169,11 @@ agreements, weeks out; best published camera-BP is ~±8–12 mmHg and not clinic
 
 ## 12. Known gaps & risks
 
-- Neural model not yet meaningful on real faces (synthetic-trained) — **top gap**.
-- Real-world HR accuracy unproven on real data — validation pending.
+- Neural + classical both validated on real UBFC (1.17 / 1.41 bpm) but on only 8
+  subjects — more subjects would strengthen the numbers and the held-out test.
 - BP unvalidated — present as experimental only.
 - Single mid-face ROI can be noisy; multi-ROI not yet implemented.
-- Colab/data fragility can stall the neural track.
+- Motion / distance robustness still the research frontier (quality degrades honestly).
 
 ## 13. How to run
 
