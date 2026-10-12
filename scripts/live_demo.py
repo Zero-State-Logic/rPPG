@@ -29,8 +29,9 @@ from rppg.live.estimate import Calibration, Reading, SignalBank  # noqa: E402
 from rppg.live.overlay import draw_face, draw_header  # noqa: E402
 
 _WINDOW = "rPPG live"
-_EST_EVERY = 0.4  # seconds between classical re-estimates per person
-_NN_EVERY = 1.0   # seconds between (heavier) neural ProPOSNet re-estimates
+_EST_EVERY = 0.4   # seconds between classical re-estimates per person
+_NN_EVERY = 1.0    # seconds between (heavier) neural ProPOSNet re-estimates
+_NN_MAX_FACES = 2  # run the neural net only on the N nearest faces (keeps it smooth)
 
 
 def _open_camera(index: int, width: int, height: int,
@@ -106,6 +107,11 @@ def main() -> None:
 
             tracks = tracker.update(detector.detect(frame))
             live_ids = set()
+            neural_ids: set[int] = set()
+            if neural is not None and tracks:
+                nearest = sorted(tracks, key=lambda t: t.det.box[2] * t.det.box[3],
+                                 reverse=True)[:_NN_MAX_FACES]
+                neural_ids = {t.id for t in nearest}
             for tr in tracks:
                 live_ids.add(tr.id)
                 if tr.id not in subj_nums:          # assign the lowest free number
@@ -119,17 +125,17 @@ def main() -> None:
                 if roi.size:
                     bgr = roi.reshape(-1, 3).mean(axis=0)
                     bank.add(tr.id, now, bgr[::-1])  # BGR -> RGB for the methods
-                    if neural is not None:
+                    if tr.id in neural_ids:
                         neural.add(tr.id, now, roi)
                 if now - last_est.get(tr.id, 0.0) >= _EST_EVERY:
                     readings[tr.id] = bank.estimate(tr.id, calib)
                     last_est[tr.id] = now
-                if neural is not None and now - last_nn.get(tr.id, 0.0) >= _NN_EVERY:
+                if tr.id in neural_ids and now - last_nn.get(tr.id, 0.0) >= _NN_EVERY:
                     nn_hr[tr.id] = neural.estimate(tr.id)
                     last_nn[tr.id] = now
                 draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
                           bp_tag="cal" if calibrated else "exp",
-                          nn_hr=nn_hr.get(tr.id) if neural is not None else None,
+                          nn_hr=nn_hr.get(tr.id) if tr.id in neural_ids else None,
                           subj_num=subj_nums[tr.id])
             bank.prune(live_ids)
             if neural is not None:
