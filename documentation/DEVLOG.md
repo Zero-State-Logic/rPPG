@@ -7,6 +7,44 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 
 ---
 
+## 2026-10-13 — Demo professionalization (FPS, forehead/cheek ROI, latency)
+
+### Plan (intent / decisions)
+- User feedback: demo ~10 FPS, >10 s to first reading (vs ~3-4 s in the first
+  version), and the ROI tracked the **lips**. Asked for research-grade work.
+- **Decision — multi-agent research first** (Workflow: 3 specialists + synthesis)
+  on real-time face tracking/FPS, rPPG ROI, and latency, then implement the
+  prioritized, low-risk plan (not a blind rewrite).
+
+### Done (accomplished / results)
+- **Root causes found (measured):** (1) camera opened without MJPG → webcam stuck
+  at uncompressed YUY2 ~10 FPS regardless of CPU; (2) YuNet ran every frame at full
+  res (52.6 ms @720p); (3) ROI band y=0.55-0.80 = mouth/lips; (4) first-reading
+  delay is the HRTracker SNR≥0 gate, not the window.
+- **Fixes implemented + validated:**
+  - Camera: MJPG FOURCC + FPS 30 + BUFFERSIZE 1 (`live_demo._open_camera`).
+  - Detection on a 480-wide downscale, boxes+landmarks scaled back (~13 ms),
+    top_k 50→20 (`detect.py`).
+  - **ROI = forehead + both cheeks**, landmark-anchored (inter-ocular-distance
+    scaled, roll-robust), skin-pooled (YCrCb gate + raw-mean fallback); box-fraction
+    fallback for far faces. Geometry unit-checked (forehead above eyes, cheeks
+    mid-face, not lips). Overlay draws all three.
+  - Faster first reading: HRTracker first-lock gate 0 → −2 dB, `_MIN_SEC` 4 → 3.
+  - Neural fed the face-box crop (matches training); still capped to 2 nearest.
+- 26 tests green; headless pipeline + ROI geometry + detect smoke all pass.
+- Research sources logged (Kossack ICCVW'21, R2I-rPPG arXiv:2410.15851, YuNet
+  tuning) in the workflow result file.
+
+### Left to do / how to continue
+1. **User to re-test on webcam** — expect ~25-30 FPS, a reading in ~3-4 s, and boxes
+   on forehead+cheeks. If `--neural` still stutters, move neural inference
+   off-thread (research STEP 6) and/or vectorize POS/CHROM + cache the ProPOS bank
+   (STEP 7).
+2. **Re-measure accuracy** with the new forehead/cheek ROI (numbers may shift).
+3. Optional: optical-flow landmark propagation + IoU association (research STEP 7).
+
+---
+
 ## 2026-10-12 — Live demo, accuracy engine, HR-jump fix, docs
 
 ### Plan (intent / decisions)
