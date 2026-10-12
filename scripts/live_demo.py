@@ -29,7 +29,8 @@ from rppg.live.estimate import Calibration, Reading, SignalBank  # noqa: E402
 from rppg.live.overlay import draw_face, draw_header  # noqa: E402
 
 _WINDOW = "rPPG live"
-_EST_EVERY = 0.4  # seconds between re-estimates per person (keeps it real-time)
+_EST_EVERY = 0.4  # seconds between classical re-estimates per person
+_NN_EVERY = 1.0   # seconds between (heavier) neural ProPOSNet re-estimates
 
 
 def _open_camera(index: int, width: int, height: int,
@@ -60,6 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="reference systolic BP for single-point calibration (key 'c')")
     ap.add_argument("--ref-dbp", type=float, default=80.0,
                     help="reference diastolic BP for single-point calibration (key 'c')")
+    ap.add_argument("--neural", nargs="?", const="artifacts/models/best.pt",
+                    default=None,
+                    help="also run the trained ProPOSNet (optional checkpoint path)")
     return ap
 
 
@@ -74,8 +78,18 @@ def main() -> None:
     bank = SignalBank()
     calib = Calibration()
     calibrated = False
+    neural = None
+    if args.neural:
+        from rppg.live.neural import NeuralHR  # lazy: only import torch if needed
+        try:
+            neural = NeuralHR(args.neural)
+            print(f"[neural] loaded ProPOSNet from {args.neural}")
+        except Exception as exc:  # noqa: BLE001 - demo should run without the net
+            print(f"[neural] disabled (could not load {args.neural}): {exc}")
     last_est: dict[int, float] = {}
+    last_nn: dict[int, float] = {}
     readings: dict[int, Reading] = {}
+    nn_hr: dict[int, float | None] = {}
     fps = 0.0
     prev = time.time()
     shots = pathlib.Path("artifacts")
@@ -98,12 +112,20 @@ def main() -> None:
                 if roi.size:
                     bgr = roi.reshape(-1, 3).mean(axis=0)
                     bank.add(tr.id, now, bgr[::-1])  # BGR -> RGB for the methods
+                    if neural is not None:
+                        neural.add(tr.id, now, roi)
                 if now - last_est.get(tr.id, 0.0) >= _EST_EVERY:
                     readings[tr.id] = bank.estimate(tr.id, calib)
                     last_est[tr.id] = now
+                if neural is not None and now - last_nn.get(tr.id, 0.0) >= _NN_EVERY:
+                    nn_hr[tr.id] = neural.estimate(tr.id)
+                    last_nn[tr.id] = now
                 draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
-                          bp_tag="cal" if calibrated else "exp")
+                          bp_tag="cal" if calibrated else "exp",
+                          nn_hr=nn_hr.get(tr.id) if neural is not None else None)
             bank.prune(live_ids)
+            if neural is not None:
+                neural.prune(live_ids)
 
             dt = now - prev
             prev = now
