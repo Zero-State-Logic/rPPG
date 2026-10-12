@@ -34,12 +34,12 @@ fusion, a live system) toward our own paper.
 | Live webcam HR, 1 person | **Working** | Classical ProPOS + POS/CHROM fusion + HR tracker. |
 | Live webcam HR, multiple people | **Working** | YuNet multi-face + per-person tracker. |
 | Near/far, moving | **Working, degrades honestly** | Quality label drops; HR holds through motion. |
-| HR accuracy | **0.20 bpm MAE on synthetic**; real **pending** | Needs real UBFC to publish a real number. |
+| HR accuracy | **Real UBFC: 1.41 bpm MAE** (95% within±5, 93% within±3) | Measured on 4 subjects; synthetic 0.20 bpm. ≤3 bpm target **met**. |
 | Harmonic/jump robustness | **Fixed** | HRTracker rejects 2× harmonic + spikes, holds through motion. |
 | Blood pressure | **Experimental only** | Heuristic + single-point calibration. NOT validated. |
 | Neural model (ProPOSNet) | **Trained on synthetic only** | Perfect on synthetic (not meaningful); needs real-data training; NOT yet in the live demo. |
 | Classical/deep training pipeline | **Working** | Subject-independent + cross-dataset; CPU local, GPU on Colab. |
-| Real UBFC data | **Blocked → unblocking** | Google Drive quota dead; Kaggle token now set locally; download pending. |
+| Real UBFC data | **4 subjects downloaded** | Via Kaggle per-file to `C:\rppg_data\UBFC`; more available (C: ~10 GB free). |
 | BP datasets | **Not obtained** | Academic agreements (weeks); request emails drafted. |
 
 ## 3. Repository map
@@ -112,10 +112,11 @@ noise, harmonics or motion. Layers added:
    jump after `_CONFIRM` confident readings agree, and holds the last value when
    SNR is low (motion). Constants in `estimate.py`.
 
-**Measured:** synthetic sweep (noise + lighting drift + breathing) → **MAE 0.20 bpm,
-100% within ±3 bpm**. Tracker unit-tested against 128-harmonic spikes, lone
-spikes, real rises and motion noise. **Real-data MAE is still to be measured** —
-that is the number that proves the claim for the paper.
+**Measured:** synthetic sweep → MAE 0.20 bpm. **Real UBFC (4 subjects, 44 windows,
+`scripts/eval_ubfc_fused.py`): MAE 1.41 bpm, RMSE 4.12, within±5 95%, within±3
+93%** — the ≤3 bpm target **met on real faces** (per subject 0.44 / 0.54 / 1.91 /
+2.77 bpm). Tracker unit-tested against 128-harmonic spikes, lone spikes, real
+rises and motion noise.
 
 ## 7. Blood pressure (honest status)
 

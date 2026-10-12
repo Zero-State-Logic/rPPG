@@ -46,19 +46,21 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
   `C:\Users\admin\.kaggle\access_token`.
 - **Docs:** `docs/DEMO_VSCODE.md` (open+run guide), and this `documentation/` folder
   (PROJECT.md + DEVLOG.md) + `CLAUDE.md` routine.
+- **Real UBFC downloaded** (per-file via Kaggle CLI — videos arrive as `vid.avi.zip`,
+  unzipped + flattened): subjects 10–13 (~1.78 GB each) to `C:\rppg_data\UBFC`.
+- **Real HR accuracy measured** (`scripts/eval_ubfc_fused.py` = YuNet ROI + the live
+  POS/CHROM/ProPOS fused estimator vs the contact-PPG ground truth): **overall
+  MAE 1.41 bpm, RMSE 4.12, within±5 95%, within±3 93%** over 44 windows — the ≤3 bpm
+  target **met on real faces**. Per subject: 0.44 / 0.54 / 1.91 / 2.77 bpm.
 - All committed/pushed to GitHub `Zero-State-Logic/rPPG`; 26 tests green.
 
 ### Left to do / how to continue
-1. **Real UBFC (token now set):** run
-   `.venv\Scripts\python.exe scripts\download_ubfc_kaggle.py --slug ashfakyeafi/ubfc-2 --out data\UBFC`
-   — but **mind disk** (E: ~6.7 GB, C: ~19 GB; full set is 28 GB). Prefer grabbing a
-   few subjects: list files first (`kaggle datasets files ashfakyeafi/ubfc-2`) and
-   fetch ~4–6, or point `--raw`/`--out` at the roomiest drive.
-2. **Measure real HR MAE** on those subjects (classical) → the publishable number.
-3. **Train ProPOSNet on the real subjects** (`scripts/train_deep.py`, CPU) → save a
-   checkpoint → add a neural HR readout to `live_demo.py` next to ProPOS.
-4. **Multi-ROI + skin masking** for extra live SNR under motion/distance.
-5. **BP datasets** (academic) → real BP model; **distance/motion** roadmap phases.
+1. **Train ProPOSNet on the real subjects** (`scripts/train_deep.py --dataset ubfc
+   --data-root C:\rppg_data\UBFC --model proposnet`, CPU) → save a checkpoint →
+   add a neural HR readout to `live_demo.py` next to ProPOS. (Only 4 subjects now →
+   weak split; grab a few more subjects if a stronger net is wanted — C: has ~10 GB.)
+2. **Multi-ROI + skin masking** for extra live SNR under motion/distance.
+3. **BP datasets** (academic) → real BP model; **distance/motion** roadmap phases.
 
 ---
 
