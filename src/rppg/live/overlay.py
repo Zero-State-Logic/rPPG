@@ -60,8 +60,13 @@ def _text(frame: np.ndarray, s: str, org: tuple[int, int], scale: float,
     cv2.putText(frame, s, org, _FONT, scale, color, thick, cv2.LINE_AA)
 
 
-def draw_face(frame: np.ndarray, track: Track, reading: Reading) -> None:
-    """Draw one person's box, ROI, readings and pulse sparkline."""
+def draw_face(frame: np.ndarray, track: Track, reading: Reading,
+              bp_tag: str = "exp") -> None:
+    """Draw one person's box, ROI, readings and pulse sparkline.
+
+    ``bp_tag`` labels the BP number -- ``"exp"`` (uncalibrated heuristic) or
+    ``"cal"`` once single-point calibration has been applied.
+    """
     x, y, w, h = track.det.box
     rx, ry, rw, rh = track.det.roi
     color, qlabel = _quality(reading)
@@ -81,7 +86,7 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading) -> None:
     if reading.ready:
         _text(frame, f"P{track.id}  {reading.hr:0.0f} bpm", (px + 8, py + 22),
               0.6, _TEXT, 1)
-        _text(frame, f"BP {reading.bp_sys:0.0f}/{reading.bp_dia:0.0f} exp",
+        _text(frame, f"BP {reading.bp_sys:0.0f}/{reading.bp_dia:0.0f} {bp_tag}",
               (px + 8, py + 42), 0.48, (180, 210, 255), 1)
         _text(frame, f"{qlabel}  SNR {reading.snr:0.1f}dB", (px + 8, py + 60),
               0.42, color, 1)

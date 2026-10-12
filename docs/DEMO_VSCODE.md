@@ -36,7 +36,7 @@ camera in decent light; after ~5 seconds a heart rate appears above your face.
 .venv\Scripts\python.exe scripts\live_demo.py --lock-exposure  # cleanest signal (needs good light)
 ```
 
-**Keys while it runs:** `q` or `Esc` to quit · `s` to save a screenshot into `artifacts\`.
+**Keys while it runs:** `q` / `Esc` quit · `s` screenshot to `artifacts\` · `c` calibrate BP.
 
 ---
 
@@ -57,6 +57,18 @@ It is labelled **`exp`** and the banner says *"BP = experimental, not a medical
 measurement."* Present it that way. Cuff-grade BP needs the blood-pressure video
 datasets on our roadmap (academic access, in progress); this value is a
 heart-rate + waveform heuristic so the demo can show the intended output.
+
+**Single-point calibration (for a stronger BP demo):** take one real reading with
+a cuff, pass it in, and press **`c`** while the subject is on camera — the display
+re-anchors to your reference and then tracks changes around it (the tag switches
+from `exp` to `cal`):
+
+```bash
+.venv\Scripts\python.exe scripts\live_demo.py --ref-sbp 118 --ref-dbp 78
+```
+
+This is an honest "calibrate once, track changes" demo, not an absolute
+measurement — say so.
 
 ---
 

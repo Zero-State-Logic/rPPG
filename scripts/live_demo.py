@@ -56,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="do not mirror the frame (mirror is on by default)")
     ap.add_argument("--lock-exposure", action="store_true",
                     help="lock camera exposure for the cleanest signal (needs light)")
+    ap.add_argument("--ref-sbp", type=float, default=120.0,
+                    help="reference systolic BP for single-point calibration (key 'c')")
+    ap.add_argument("--ref-dbp", type=float, default=80.0,
+                    help="reference diastolic BP for single-point calibration (key 'c')")
     return ap
 
 
@@ -69,6 +73,7 @@ def main() -> None:
     tracker = CentroidTracker()
     bank = SignalBank()
     calib = Calibration()
+    calibrated = False
     last_est: dict[int, float] = {}
     readings: dict[int, Reading] = {}
     fps = 0.0
@@ -96,7 +101,8 @@ def main() -> None:
                 if now - last_est.get(tr.id, 0.0) >= _EST_EVERY:
                     readings[tr.id] = bank.estimate(tr.id, calib)
                     last_est[tr.id] = now
-                draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)))
+                draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
+                          bp_tag="cal" if calibrated else "exp")
             bank.prune(live_ids)
 
             dt = now - prev
@@ -114,6 +120,15 @@ def main() -> None:
                 name = shots / f"rppg-{time.strftime('%Y%m%d-%H%M%S')}.png"
                 cv2.imwrite(str(name), frame)
                 print(f"[saved] {name}")
+            if key == ord("c") and tracks:
+                primary = max(tracks, key=lambda t: t.det.box[2] * t.det.box[3])
+                raw = bank.estimate(primary.id, Calibration())
+                if raw.ready:
+                    calib = Calibration(args.ref_sbp - raw.bp_sys,
+                                        args.ref_dbp - raw.bp_dia)
+                    calibrated = True
+                    print(f"[calibrated] P{primary.id} baseline set to "
+                          f"{args.ref_sbp:.0f}/{args.ref_dbp:.0f} mmHg")
     finally:
         cap.release()
         cv2.destroyAllWindows()
