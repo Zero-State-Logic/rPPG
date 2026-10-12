@@ -52,6 +52,14 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
   POS/CHROM/ProPOS fused estimator vs the contact-PPG ground truth): **overall
   MAE 1.41 bpm, RMSE 4.12, within±5 95%, within±3 93%** over 44 windows — the ≤3 bpm
   target **met on real faces**. Per subject: 0.44 / 0.54 / 1.91 / 2.77 bpm.
+- **ProPOSNet trained on real faces** (`train_deep.py`, 4 subjects → 2 train):
+  held-out **MAE 3.81 bpm, within±5 67%, Pearson 0.36** — real-data result (no longer
+  synthetic), weaker than the classical 1.41 bpm (only 2 training subjects). Checkpoint
+  `artifacts/models/best.pt`.
+- **Trained net wired into the live demo** (`src/rppg/live/neural.py`, `--neural`):
+  shows a "ProPOSNet N bpm" line per face next to the classical HR. Headless-validated
+  (loads checkpoint, forwards, returns HR). Run: `live_demo.py --neural`.
+- **Downloading 4 more subjects** (10→14…17) to retrain for a stronger neural number.
 - All committed/pushed to GitHub `Zero-State-Logic/rPPG`; 26 tests green.
 
 ### Left to do / how to continue
