@@ -28,8 +28,15 @@ from ..methods.classical.propos import propos_pulse
 
 _WINDOW_SEC = 10.0      # rolling buffer length used for each estimate
 _MIN_SEC = 4.0          # need this many seconds before the first HR is shown
-_HR_SMOOTH = 7          # median window (estimates) for a steady HR readout
 _PLOT_SAMPLES = 160     # trailing pulse samples handed to the overlay plot
+
+# HR tracker: reject 2nd-harmonic locks, rate-limit jumps, hold through motion.
+_HR_MIN, _HR_MAX = 40.0, 180.0   # plausible live heart-rate range (bpm)
+_SLEW = 8.0                      # max smoothed HR change accepted per update (bpm)
+_STRONG_SNR = 2.0                # dB above which a reading is treated as confident
+_CONFIRM = 3                     # confident agreeing readings needed to jump regime
+_ALPHA_STRONG, _ALPHA_WEAK = 0.35, 0.15   # smoothing rates by confidence
+_HARMONIC_TOL = 12.0             # bpm window for spotting a 2x-current harmonic
 
 # Experimental BP heuristic anchors (see module docstring -- NOT validated).
 _SBP0, _DBP0, _HR0 = 118.0, 76.0, 70.0
@@ -90,12 +97,57 @@ def _experimental_bp(hr: float, pulse: np.ndarray, fps: float,
     return sbp, dbp
 
 
+class HRTracker:
+    """Stateful HR smoother: harmonic correction + slew limit + confirmation.
+
+    Fixes the two common live failures -- the estimate jumping to double the true
+    rate (2nd-harmonic lock, e.g. 64 -> 128) and brief spikes while moving -- by
+    (1) folding x0.5 / x2 harmonics back toward the current rate, (2) rate-limiting
+    how far the shown HR can move per update, and (3) only following a large jump
+    once several confident readings agree on the new rate. Low-confidence readings
+    just hold the last value instead of showing noise.
+    """
+
+    def __init__(self) -> None:
+        self.hr: float | None = None
+        self._cand: float | None = None
+        self._cand_n = 0
+
+    def update(self, hr_raw: float, snr: float) -> float | None:
+        """Fold one raw (hr, snr) into the tracked HR; None until a clean lock."""
+        if not np.isfinite(hr_raw) or not (_HR_MIN <= hr_raw <= _HR_MAX):
+            return self.hr                              # implausible/missing -> hold
+        if self.hr is None:
+            if snr < 0.0:
+                return None                             # wait for a clean first lock
+            self.hr = hr_raw
+            return self.hr
+
+        chosen = hr_raw
+        if abs(hr_raw - 2.0 * self.hr) < _HARMONIC_TOL and hr_raw / 2.0 >= _HR_MIN:
+            chosen = hr_raw / 2.0        # reading ~2x current -> 2nd harmonic, halve
+        delta = chosen - self.hr
+        strong = snr >= _STRONG_SNR
+
+        if abs(delta) <= _SLEW:                         # gentle, in-range change
+            self.hr += (_ALPHA_STRONG if strong else _ALPHA_WEAK) * delta
+            self._cand, self._cand_n = None, 0
+        else:                                           # big jump: demand agreement
+            if self._cand is not None and abs(chosen - self._cand) <= _SLEW:
+                self._cand_n += 1
+            else:
+                self._cand, self._cand_n = chosen, 1
+            if strong and self._cand_n >= _CONFIRM:
+                self.hr, self._cand, self._cand_n = self._cand, None, 0
+        return self.hr
+
+
 class PersonSignal:
     """Rolling ROI-colour buffer for one tracked face -> HR/BP readings."""
 
     def __init__(self, window_sec: float = _WINDOW_SEC) -> None:
         self._samples: deque[tuple[float, np.ndarray]] = deque()
-        self._hr_history: deque[float] = deque(maxlen=_HR_SMOOTH)
+        self._tracker = HRTracker()
         self._window = window_sec
 
     def add(self, timestamp: float, rgb: np.ndarray) -> None:
@@ -141,8 +193,9 @@ class PersonSignal:
         if not np.isfinite(hr_raw):
             return Reading(ready=False, seconds=seconds)
 
-        self._hr_history.append(hr_raw)
-        hr = float(np.median(self._hr_history))
+        hr = self._tracker.update(hr_raw, snr)
+        if hr is None:
+            return Reading(ready=False, seconds=seconds)
         best = max(scored, key=lambda s: s[3] if np.isfinite(s[3]) else -1e9)
         best_pulse = best[1]
         sbp, dbp = _experimental_bp(hr, best_pulse, fps, calib)
