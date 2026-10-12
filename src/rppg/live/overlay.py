@@ -61,16 +61,19 @@ def _text(frame: np.ndarray, s: str, org: tuple[int, int], scale: float,
 
 
 def draw_face(frame: np.ndarray, track: Track, reading: Reading,
-              bp_tag: str = "exp", nn_hr: float | None = None) -> None:
+              bp_tag: str = "exp", nn_hr: float | None = None,
+              subj_num: int | None = None) -> None:
     """Draw one person's box, ROI, readings and pulse sparkline.
 
     ``bp_tag`` labels the BP number -- ``"exp"`` (uncalibrated heuristic) or
     ``"cal"`` once single-point calibration has been applied. ``nn_hr``, when
     given, adds the trained ProPOSNet heart-rate line below the classical one.
+    ``subj_num`` is the stable 1-based person label ("Subj 1", "Subj 2", ...).
     """
     x, y, w, h = track.det.box
     rx, ry, rw, rh = track.det.roi
     color, qlabel = _quality(reading)
+    name = f"Subj {subj_num}" if subj_num is not None else f"P{track.id}"
 
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
     cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), _ACCENT, 1)
@@ -85,7 +88,7 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
     cv2.rectangle(frame, (px, py), (px + panel_w, py + panel_h), color, 1)
 
     if reading.ready:
-        _text(frame, f"P{track.id}  {reading.hr:0.0f} bpm", (px + 8, py + 22),
+        _text(frame, f"{name}  {reading.hr:0.0f} bpm", (px + 8, py + 22),
               0.6, _TEXT, 1)
         _text(frame, f"BP {reading.bp_sys:0.0f}/{reading.bp_dia:0.0f} {bp_tag}",
               (px + 8, py + 42), 0.48, (180, 210, 255), 1)
@@ -96,7 +99,7 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
             _text(frame, f"ProPOSNet {nn_hr:0.0f} bpm", (px + 8, py + 79), 0.44,
                   (120, 230, 200), 1)
     else:
-        _text(frame, f"P{track.id}", (px + 8, py + 22), 0.6, _TEXT, 1)
+        _text(frame, name, (px + 8, py + 22), 0.6, _TEXT, 1)
         _text(frame, qlabel, (px + 8, py + 46), 0.5, _IDLE, 1)
 
 

@@ -90,6 +90,7 @@ def main() -> None:
     last_nn: dict[int, float] = {}
     readings: dict[int, Reading] = {}
     nn_hr: dict[int, float | None] = {}
+    subj_nums: dict[int, int] = {}  # track id -> stable 1-based "Subj N" label
     fps = 0.0
     prev = time.time()
     shots = pathlib.Path("artifacts")
@@ -107,6 +108,12 @@ def main() -> None:
             live_ids = set()
             for tr in tracks:
                 live_ids.add(tr.id)
+                if tr.id not in subj_nums:          # assign the lowest free number
+                    used = set(subj_nums.values())
+                    n = 1
+                    while n in used:
+                        n += 1
+                    subj_nums[tr.id] = n
                 rx, ry, rw, rh = tr.det.roi
                 roi = frame[ry:ry + rh, rx:rx + rw]
                 if roi.size:
@@ -122,10 +129,13 @@ def main() -> None:
                     last_nn[tr.id] = now
                 draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
                           bp_tag="cal" if calibrated else "exp",
-                          nn_hr=nn_hr.get(tr.id) if neural is not None else None)
+                          nn_hr=nn_hr.get(tr.id) if neural is not None else None,
+                          subj_num=subj_nums[tr.id])
             bank.prune(live_ids)
             if neural is not None:
                 neural.prune(live_ids)
+            for gone in [tid for tid in subj_nums if tid not in live_ids]:
+                del subj_nums[gone]
 
             dt = now - prev
             prev = now
