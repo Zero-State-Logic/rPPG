@@ -73,9 +73,14 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 - All committed/pushed to GitHub `Zero-State-Logic/rPPG`; 26 tests green.
 
 ### Left to do / how to continue
-1. **Investigate the subject17 classical outlier** (10.3 bpm) — check YuNet detection
-   / ROI coverage / ground-truth PPG alignment for that mirror; likely a fixable data
-   issue, and excluding/fixing it brings the overall classical MAE back near ~1.5 bpm.
+1. **subject17 diagnosed** (not a data bug): face detected 100%, ground truth clean
+   (PPG-HR ≈ device-HR ≈ 88). The error is a **late signal collapse** — windows 8–10
+   drop to ~53 vs true ~88 — which the raw per-window eval counts in full. The live
+   HR tracker (`eval_ubfc_fused.py --track`) rejects it → subject17 **1.73 bpm**. BUT
+   at the coarse 2 s eval step the tracker can mis-lock a clean subject (subject10
+   0.44→9.82), so the **raw per-window 2.78 bpm stays the conservative headline**;
+   live 0.4 s updates behave better than either offline measure. Neural **1.17 bpm**
+   remains the cleanest single figure.
 2. **Multi-ROI + skin masking** for extra live SNR under motion/distance.
 3. **Distance/motion** robustness ladders; **BP datasets** (academic) → real BP model.
 4. More subjects (C: ~3.6 GB free — clear space or use another drive) would lift the

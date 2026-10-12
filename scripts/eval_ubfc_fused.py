@@ -25,6 +25,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from rppg.hr.metrics import accuracy_within, mae, rmse  # noqa: E402
 from rppg.hr.refine import bandpass, fuse_estimates, hr_peak_interp  # noqa: E402
 from rppg.live.detect import YuNetDetector  # noqa: E402
+from rppg.live.estimate import HRTracker  # noqa: E402
 from rppg.methods.classical.chrom import chrom_pulse  # noqa: E402
 from rppg.methods.classical.pos import pos_pulse  # noqa: E402
 from rppg.methods.classical.propos import propos_pulse  # noqa: E402
@@ -58,11 +59,11 @@ def roi_rgb_trace(video_path: str, detector: YuNetDetector,
     return np.asarray(rgb, dtype=np.float64).T, fps
 
 
-def fused_hr(trace: np.ndarray, fps: float) -> float:
-    """HR (bpm) from the (3, T) trace via the live POS/CHROM/ProPOS SNR fusion."""
+def fused_hr(trace: np.ndarray, fps: float) -> tuple[float, float]:
+    """(HR bpm, SNR dB) from the (3, T) trace via POS/CHROM/ProPOS SNR fusion."""
     methods = (pos_pulse, chrom_pulse, lambda r, f: propos_pulse(r, f, do_fit=False))
     ests = [hr_peak_interp(bandpass(fn(trace, fps), fps), fps) for fn in methods]
-    return fuse_estimates(ests)[0]
+    return fuse_estimates(ests)
 
 
 def ppg_hr(ppg_window: np.ndarray, fps: float) -> float:
@@ -71,18 +72,27 @@ def ppg_hr(ppg_window: np.ndarray, fps: float) -> float:
 
 
 def eval_subject(subject_dir: pathlib.Path, detector: YuNetDetector,
-                 max_frames: int, win_sec: float, step_sec: float
-                 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (predicted, ground-truth) HR arrays over all sliding windows."""
+                 max_frames: int, win_sec: float, step_sec: float,
+                 track: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """Return (predicted, ground-truth) HR arrays over all sliding windows.
+
+    With ``track`` the live :class:`HRTracker` is applied across windows, matching
+    exactly what the webcam demo does (harmonic + spike rejection, motion hold).
+    """
     trace, fps = roi_rgb_trace(str(subject_dir / "vid.avi"), detector, max_frames)
     with open(subject_dir / "ground_truth.txt", encoding="utf-8") as fh:
         ppg = np.array(fh.readline().split(), dtype=np.float64)
     n = min(trace.shape[1], ppg.size)
     trace, ppg = trace[:, :n], ppg[:n]
     w, s = int(round(win_sec * fps)), max(1, int(round(step_sec * fps)))
+    tracker = HRTracker() if track else None
     preds, gts = [], []
     for st in range(0, n - w + 1, s):
-        preds.append(fused_hr(trace[:, st:st + w], fps))
+        hr, snr = fused_hr(trace[:, st:st + w], fps)
+        if tracker is not None:
+            hr = tracker.update(hr, snr)
+            hr = float("nan") if hr is None else hr
+        preds.append(hr)
         gts.append(ppg_hr(ppg[st:st + w], fps))
     return np.array(preds), np.array(gts)
 
@@ -94,6 +104,8 @@ def main() -> None:
     ap.add_argument("--max-frames", type=int, default=900)
     ap.add_argument("--win-sec", type=float, default=10.0)
     ap.add_argument("--step-sec", type=float, default=2.0)
+    ap.add_argument("--track", action="store_true",
+                    help="apply the live HR tracker across windows (matches the demo)")
     args = ap.parse_args()
 
     detector = YuNetDetector()
@@ -106,7 +118,7 @@ def main() -> None:
     all_pred, all_gt = [], []
     for sub in subjects:
         pred, gt = eval_subject(sub, detector, args.max_frames,
-                                args.win_sec, args.step_sec)
+                                args.win_sec, args.step_sec, track=args.track)
         ok = np.isfinite(pred) & np.isfinite(gt)
         all_pred.append(pred[ok])
         all_gt.append(gt[ok])
