@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 /data/
 /artifacts/
+/models/
 third_party/rPPG-Toolbox/
 *.mp4
 *.avi
