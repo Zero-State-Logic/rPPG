@@ -71,12 +71,12 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
     ``subj_num`` is the stable 1-based person label ("Subj 1", "Subj 2", ...).
     """
     x, y, w, h = track.det.box
-    rx, ry, rw, rh = track.det.roi
     color, qlabel = _quality(reading)
     name = f"Subj {subj_num}" if subj_num is not None else f"P{track.id}"
 
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
-    cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), _ACCENT, 1)
+    for rx, ry, rw, rh in track.det.rois:   # forehead + both cheeks
+        cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), _ACCENT, 1)
 
     panel_w = max(w, 168)
     panel_h = 86 if (reading.ready and nn_hr is not None) else 70

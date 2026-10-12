@@ -27,7 +27,7 @@ from ..methods.classical.pos import pos_pulse
 from ..methods.classical.propos import propos_pulse
 
 _WINDOW_SEC = 10.0      # rolling buffer length used for each estimate
-_MIN_SEC = 4.0          # need this many seconds before the first HR is shown
+_MIN_SEC = 3.0          # need this many seconds before the first HR is shown
 _PLOT_SAMPLES = 160     # trailing pulse samples handed to the overlay plot
 
 # HR tracker: reject 2nd-harmonic locks, rate-limit jumps, hold through motion.
@@ -37,6 +37,7 @@ _STRONG_SNR = 2.0                # dB above which a reading is treated as confid
 _CONFIRM = 3                     # confident agreeing readings needed to jump regime
 _ALPHA_STRONG, _ALPHA_WEAK = 0.35, 0.15   # smoothing rates by confidence
 _HARMONIC_TOL = 12.0             # bpm window for spotting a 2x-current harmonic
+_FIRST_LOCK_SNR = -2.0           # accept the first HR lock once SNR clears this (dB)
 
 # Experimental BP heuristic anchors (see module docstring -- NOT validated).
 _SBP0, _DBP0, _HR0 = 118.0, 76.0, 70.0
@@ -118,8 +119,8 @@ class HRTracker:
         if not np.isfinite(hr_raw) or not (_HR_MIN <= hr_raw <= _HR_MAX):
             return self.hr                              # implausible/missing -> hold
         if self.hr is None:
-            if snr < 0.0:
-                return None                             # wait for a clean first lock
+            if snr < _FIRST_LOCK_SNR:
+                return None                             # wait for a usable first lock
             self.hr = hr_raw
             return self.hr
 

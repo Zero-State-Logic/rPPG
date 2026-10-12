@@ -21,6 +21,7 @@ import sys
 import time
 
 import cv2
+import numpy as np
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 
@@ -33,6 +34,43 @@ _EST_EVERY = 0.4   # seconds between classical re-estimates per person
 _NN_EVERY = 1.0    # seconds between (heavier) neural ProPOSNet re-estimates
 _NN_MAX_FACES = 2  # run the neural net only on the N nearest faces (keeps it smooth)
 
+# YCrCb skin gate (reused from src/rppg/face/roi.py) for the multi-ROI colour read.
+_SKIN_LO = (0, 133, 77)
+_SKIN_HI = (255, 173, 127)
+_MIN_SKIN_PX = 50
+
+
+def _pooled_skin_rgb(frame: np.ndarray, rois) -> np.ndarray | None:
+    """Mean RGB over skin pixels pooled across the ROI patches (forehead + cheeks).
+
+    Returns an (R, G, B) float vector, or None when the patches are empty. Falls
+    back to the raw patch mean when too few skin pixels pass the gate, so a reading
+    is never lost under hard lighting or darker skin tones.
+    """
+    skin_sum = np.zeros(3, dtype=np.float64)
+    skin_n = 0
+    raw_sum = np.zeros(3, dtype=np.float64)
+    raw_n = 0
+    for rx, ry, rw, rh in rois:
+        patch = frame[ry:ry + rh, rx:rx + rw]
+        if patch.size == 0:
+            continue
+        flat = patch.reshape(-1, 3).astype(np.float64)
+        raw_sum += flat.sum(axis=0)
+        raw_n += flat.shape[0]
+        ycc = cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb).reshape(-1, 3)
+        mask = ((ycc[:, 0] >= _SKIN_LO[0]) & (ycc[:, 0] <= _SKIN_HI[0]) &
+                (ycc[:, 1] >= _SKIN_LO[1]) & (ycc[:, 1] <= _SKIN_HI[1]) &
+                (ycc[:, 2] >= _SKIN_LO[2]) & (ycc[:, 2] <= _SKIN_HI[2]))
+        if mask.any():
+            skin_sum += flat[mask].sum(axis=0)
+            skin_n += int(mask.sum())
+    if skin_n >= _MIN_SKIN_PX:
+        return (skin_sum / skin_n)[::-1]   # BGR -> RGB
+    if raw_n > 0:
+        return (raw_sum / raw_n)[::-1]
+    return None
+
 
 def _open_camera(index: int, width: int, height: int,
                  lock_exposure: bool) -> cv2.VideoCapture:
@@ -40,8 +78,11 @@ def _open_camera(index: int, width: int, height: int,
     cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
     if not cap.isOpened():
         cap = cv2.VideoCapture(index)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))  # avoid YUY2 FPS cap
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)         # drop stale frames -> low latency
     cap.set(cv2.CAP_PROP_AUTO_WB, 0)            # steady colour -> cleaner rPPG
     if lock_exposure:
         cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)  # DSHOW: 0.25 = manual exposure
@@ -120,13 +161,14 @@ def main() -> None:
                     while n in used:
                         n += 1
                     subj_nums[tr.id] = n
-                rx, ry, rw, rh = tr.det.roi
-                roi = frame[ry:ry + rh, rx:rx + rw]
-                if roi.size:
-                    bgr = roi.reshape(-1, 3).mean(axis=0)
-                    bank.add(tr.id, now, bgr[::-1])  # BGR -> RGB for the methods
-                    if tr.id in neural_ids:
-                        neural.add(tr.id, now, roi)
+                rgb = _pooled_skin_rgb(frame, tr.det.rois)
+                if rgb is not None:
+                    bank.add(tr.id, now, rgb)   # forehead + cheeks, skin-pooled
+                if tr.id in neural_ids:
+                    bx, by, bw, bh = tr.det.box
+                    face_crop = frame[by:by + bh, bx:bx + bw]
+                    if face_crop.size:
+                        neural.add(tr.id, now, face_crop)  # net trained on face frames
                 if now - last_est.get(tr.id, 0.0) >= _EST_EVERY:
                     readings[tr.id] = bank.estimate(tr.id, calib)
                     last_est[tr.id] = now
