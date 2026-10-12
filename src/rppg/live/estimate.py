@@ -21,7 +21,9 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.signal import periodogram
 
-from ..hr.metrics import estimate_hr_fft, snr_db
+from ..hr.refine import bandpass, fuse_estimates, hr_peak_interp
+from ..methods.classical.chrom import chrom_pulse
+from ..methods.classical.pos import pos_pulse
 from ..methods.classical.propos import propos_pulse
 
 _WINDOW_SEC = 10.0      # rolling buffer length used for each estimate
@@ -124,16 +126,28 @@ class PersonSignal:
         if resampled is None or seconds < _MIN_SEC:
             return Reading(ready=False, seconds=seconds)
         trace, fps = resampled
-        pulse = propos_pulse(trace, fps)
-        hr_raw = estimate_hr_fft(pulse, fps)
+
+        # Run three rPPG methods, band-pass each pulse, and fuse by SNR so the
+        # strongest-pulse method wins each instant (robust multi-method estimate).
+        pulses = {"pos": pos_pulse(trace, fps),
+                  "chrom": chrom_pulse(trace, fps),
+                  "propos": propos_pulse(trace, fps, do_fit=False)}
+        scored = []
+        for name, raw in pulses.items():
+            filt = bandpass(raw, fps)
+            hr_i, snr_i = hr_peak_interp(filt, fps)
+            scored.append((name, filt, hr_i, snr_i))
+        hr_raw, snr = fuse_estimates([(s[2], s[3]) for s in scored])
         if not np.isfinite(hr_raw):
             return Reading(ready=False, seconds=seconds)
+
         self._hr_history.append(hr_raw)
         hr = float(np.median(self._hr_history))
-        sbp, dbp = _experimental_bp(hr, pulse, fps, calib)
-        tail = pulse[-_PLOT_SAMPLES:]
+        best = max(scored, key=lambda s: s[3] if np.isfinite(s[3]) else -1e9)
+        best_pulse = best[1]
+        sbp, dbp = _experimental_bp(hr, best_pulse, fps, calib)
         return Reading(ready=True, seconds=seconds, hr=hr, bp_sys=sbp, bp_dia=dbp,
-                       snr=snr_db(pulse, fps, hr / 60.0), pulse=tail)
+                       snr=snr, pulse=best_pulse[-_PLOT_SAMPLES:])
 
 
 class SignalBank:
