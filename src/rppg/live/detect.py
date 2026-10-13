@@ -30,6 +30,7 @@ _YUNET_URL = ("https://github.com/opencv/opencv_zoo/raw/main/models/"
 
 _DETECT_LONG_SIDE = 480   # detect on a frame downscaled to this long side (speed)
 _MIN_IOD = 8.0            # below this inter-ocular distance, use box-fraction ROIs
+_DIM_LUMA = 90.0          # below this mean brightness, lift the DETECTION frame only
 
 # Forehead + cheek ROI geometry, in multiples of inter-ocular distance (landmarks).
 _FOREHEAD_UP = 0.60       # forehead centre sits this * iod above the eye line
@@ -156,6 +157,10 @@ class YuNetDetector:
                                interpolation=cv2.INTER_AREA)
         else:
             small, scale = frame_bgr, 1.0
+        mean_luma = float(small.mean())
+        if mean_luma < _DIM_LUMA:   # brighten a dark frame for detection only
+            small = cv2.convertScaleAbs(
+                small, alpha=min(3.0, _DIM_LUMA / max(mean_luma, 1.0)), beta=8)
         small_h, small_w = small.shape[:2]
         if (small_w, small_h) != self._size:
             self._det.setInputSize((small_w, small_h))
