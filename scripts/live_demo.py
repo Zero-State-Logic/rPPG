@@ -106,6 +106,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--neural", nargs="?", const="artifacts/models/best.pt",
                     default=None,
                     help="also run the trained ProPOSNet (optional checkpoint path)")
+    ap.add_argument("--bp-model", default="artifacts/models/bp_model.pkl",
+                    help="trained BP model to use instead of the heuristic (if present)")
     return ap
 
 
@@ -135,6 +137,14 @@ def main() -> None:
             print(f"[neural] loaded ProPOSNet from {args.neural}")
         except Exception as exc:  # noqa: BLE001 - demo should run without the net
             print(f"[neural] disabled (could not load {args.neural}): {exc}")
+    bp_model = None
+    if args.bp_model and pathlib.Path(args.bp_model).exists():
+        from rppg.live.bp_model import BPModel
+        try:
+            bp_model = BPModel(args.bp_model)
+            print(f"[bp] using trained model {args.bp_model} (experimental on rPPG)")
+        except Exception as exc:  # noqa: BLE001 - fall back to the heuristic
+            print(f"[bp] heuristic BP (could not load {args.bp_model}): {exc}")
     last_est: dict[int, float] = {}
     last_nn: dict[int, float] = {}
     readings: dict[int, Reading] = {}
@@ -177,13 +187,14 @@ def main() -> None:
                     if face_crop.size:
                         neural.add(tr.id, now, face_crop)  # net trained on face frames
                 if now - last_est.get(tr.id, 0.0) >= _EST_EVERY:
-                    readings[tr.id] = bank.estimate(tr.id, calib)
+                    readings[tr.id] = bank.estimate(tr.id, calib, bp_model)
                     last_est[tr.id] = now
                 if tr.id in neural_ids and now - last_nn.get(tr.id, 0.0) >= _NN_EVERY:
                     nn_hr[tr.id] = neural.estimate(tr.id)
                     last_nn[tr.id] = now
+                bp_tag = "cal" if calibrated else ("mdl" if bp_model else "exp")
                 draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
-                          bp_tag="cal" if calibrated else "exp",
+                          bp_tag=bp_tag,
                           nn_hr=nn_hr.get(tr.id) if tr.id in neural_ids else None,
                           subj_num=subj_nums[tr.id])
             bank.prune(live_ids)
@@ -209,7 +220,7 @@ def main() -> None:
                 print(f"[saved] {name}")
             if key == ord("c") and tracks:
                 primary = max(tracks, key=lambda t: t.det.box[2] * t.det.box[3])
-                raw = bank.estimate(primary.id, Calibration())
+                raw = bank.estimate(primary.id, Calibration(), bp_model)
                 if raw.ready:
                     calib = Calibration(args.ref_sbp - raw.bp_sys,
                                         args.ref_dbp - raw.bp_dia)

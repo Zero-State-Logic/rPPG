@@ -174,8 +174,12 @@ class PersonSignal:
         trace = np.stack([np.interp(grid, ts, rgb[c]) for c in range(3)], axis=0)
         return trace, (n - 1) / span
 
-    def estimate(self, calib: Calibration) -> Reading:
-        """Compute the current reading; ``ready`` False until enough signal exists."""
+    def estimate(self, calib: Calibration, bp_model=None) -> Reading:
+        """Compute the current reading; ``ready`` False until enough signal exists.
+
+        ``bp_model`` (a ``rppg.live.bp_model.BPModel``), when given, replaces the
+        experimental heuristic with the trained regressor's BP estimate.
+        """
         seconds = (self._samples[-1][0] - self._samples[0][0]) if self._samples else 0.0
         resampled = self._uniform_trace()
         if resampled is None or seconds < _MIN_SEC:
@@ -205,7 +209,14 @@ class PersonSignal:
             return Reading(ready=False, seconds=seconds)
         best = max(scored, key=lambda s: s[3] if np.isfinite(s[3]) else -1e9)
         best_pulse = best[1]
-        sbp, dbp = _experimental_bp(hr, best_pulse, fps, calib)
+        sbp = dbp = float("nan")
+        if bp_model is not None:
+            pred = bp_model.predict(best_pulse, fps)
+            if pred is not None:
+                sbp = pred[0] + calib.sbp_offset
+                dbp = pred[1] + calib.dbp_offset
+        if not np.isfinite(sbp):
+            sbp, dbp = _experimental_bp(hr, best_pulse, fps, calib)
         return Reading(ready=True, seconds=seconds, hr=hr, bp_sys=sbp, bp_dia=dbp,
                        snr=snr, provisional=provisional, pulse=best_pulse[-_PLOT_SAMPLES:])
 
@@ -220,10 +231,11 @@ class SignalBank:
         """Route a sample to the buffer for ``track_id`` (created on first use)."""
         self._people.setdefault(track_id, PersonSignal()).add(timestamp, rgb)
 
-    def estimate(self, track_id: int, calib: Calibration) -> Reading:
+    def estimate(self, track_id: int, calib: Calibration, bp_model=None) -> Reading:
         """Current reading for ``track_id`` (empty not-ready reading if unknown)."""
         signal = self._people.get(track_id)
-        return signal.estimate(calib) if signal else Reading(ready=False, seconds=0.0)
+        return (signal.estimate(calib, bp_model) if signal
+                else Reading(ready=False, seconds=0.0))
 
     def prune(self, live_ids: set[int]) -> None:
         """Forget buffers whose faces are no longer tracked."""
