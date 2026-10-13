@@ -31,7 +31,9 @@ def bandpass(sig: np.ndarray, fps: float, lo: float = _LO_HZ,
     x = x - x.mean()
     nyq = 0.5 * fps
     lo_n, hi_n = max(1e-3, lo / nyq), min(0.99, hi / nyq)
-    if hi_n <= lo_n or x.size <= 3 * order + 1:
+    # filtfilt needs len(x) > its padlen (= 3 * filter length = 3*(2*order+1));
+    # too-short windows (early provisional reading / low FPS) skip filtering.
+    if hi_n <= lo_n or x.size <= 3 * (2 * order + 1):
         return x
     b, a = butter(order, [lo_n, hi_n], btype="band")
     return filtfilt(b, a, x)
