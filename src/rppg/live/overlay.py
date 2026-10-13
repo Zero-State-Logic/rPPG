@@ -31,6 +31,8 @@ def _quality(reading: Reading) -> tuple[tuple[int, int, int], str]:
     """Map a reading to a (colour, label) pair for the overlay."""
     if not reading.ready:
         return _IDLE, f"measuring {reading.seconds:0.0f}s"
+    if reading.provisional:
+        return _FAIR, "acquiring"
     if reading.snr >= _SNR_GOOD:
         return _GOOD, "strong"
     if reading.snr >= _SNR_FAIR:
@@ -88,8 +90,8 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
     cv2.rectangle(frame, (px, py), (px + panel_w, py + panel_h), color, 1)
 
     if reading.ready:
-        _text(frame, f"{name}  {reading.hr:0.0f} bpm", (px + 8, py + 22),
-              0.6, _TEXT, 1)
+        hr_txt = f"~{reading.hr:0.0f}" if reading.provisional else f"{reading.hr:0.0f}"
+        _text(frame, f"{name}  {hr_txt} bpm", (px + 8, py + 22), 0.6, _TEXT, 1)
         _text(frame, f"BP {reading.bp_sys:0.0f}/{reading.bp_dia:0.0f} {bp_tag}",
               (px + 8, py + 42), 0.48, (180, 210, 255), 1)
         _text(frame, f"{qlabel}  SNR {reading.snr:0.1f}dB", (px + 8, py + 60),

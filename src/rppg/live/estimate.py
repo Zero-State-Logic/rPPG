@@ -27,7 +27,8 @@ from ..methods.classical.pos import pos_pulse
 from ..methods.classical.propos import propos_pulse
 
 _WINDOW_SEC = 10.0      # rolling buffer length used for each estimate
-_MIN_SEC = 3.0          # need this many seconds before the first HR is shown
+_MIN_SEC = 1.0          # show a provisional ("acquiring") reading this early
+_LOCK_SEC = 4.0         # readings before this stay provisional, then they lock
 _PLOT_SAMPLES = 160     # trailing pulse samples handed to the overlay plot
 
 # HR tracker: reject 2nd-harmonic locks, rate-limit jumps, hold through motion.
@@ -64,6 +65,7 @@ class Reading:
     bp_sys: float = float("nan")
     bp_dia: float = float("nan")
     snr: float = float("nan")
+    provisional: bool = False
     pulse: np.ndarray = field(default_factory=lambda: np.empty(0))
 
 
@@ -194,14 +196,18 @@ class PersonSignal:
         if not np.isfinite(hr_raw):
             return Reading(ready=False, seconds=seconds)
 
-        hr = self._tracker.update(hr_raw, snr)
-        if hr is None:
+        tracked = self._tracker.update(hr_raw, snr)
+        if tracked is not None:
+            hr, provisional = tracked, seconds < _LOCK_SEC
+        elif _HR_MIN <= hr_raw <= _HR_MAX:
+            hr, provisional = hr_raw, True   # early provisional, before a clean lock
+        else:
             return Reading(ready=False, seconds=seconds)
         best = max(scored, key=lambda s: s[3] if np.isfinite(s[3]) else -1e9)
         best_pulse = best[1]
         sbp, dbp = _experimental_bp(hr, best_pulse, fps, calib)
         return Reading(ready=True, seconds=seconds, hr=hr, bp_sys=sbp, bp_dia=dbp,
-                       snr=snr, pulse=best_pulse[-_PLOT_SAMPLES:])
+                       snr=snr, provisional=provisional, pulse=best_pulse[-_PLOT_SAMPLES:])
 
 
 class SignalBank:
