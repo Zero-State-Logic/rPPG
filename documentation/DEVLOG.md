@@ -35,6 +35,22 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 - Research sources logged (Kossack ICCVW'21, R2I-rPPG arXiv:2410.15851, YuNet
   tuning) in the workflow result file.
 
+### Follow-ups (same session)
+- **HR in ~1s**: provisional "acquiring ~X bpm" at `_MIN_SEC=1.0`, converging to a
+  locked value by ~4 s (validated: ~62 provisional @1s → 72.1 locked @5s).
+- **Crash fix**: `bandpass` skips `filtfilt` when the window ≤ padlen (was crashing
+  at low FPS / the 1 s window).
+- **Low-light detection**: the DETECTION frame is brightened when dim so YuNet still
+  finds dim/backlit faces (signal untouched). Verified the detector finds a real
+  face 30/30 frames @0.94 — the user's "people:0" was a ceiling-pointing camera
+  angle, not a code bug.
+- **BP: real trained model.** Downloaded `mkachuee/noninvasivebp` (26 subjects,
+  finger PPG + cuff SBP/DBP), resampled 500→30 Hz, trained the `BPRegressor`
+  subject-independent: **SBP MAE 15.1 (BHS-D, beats mean-predictor 19.6), DBP MAE
+  6.5 (BHS-C, ≈ baseline 6.2)**. Saved `artifacts/models/bp_model.pkl`; wired into
+  the demo via `--bp-model` (tag "mdl"), heuristic fallback. Honest: weak (esp.
+  DBP) and rougher on rPPG (contact→camera domain gap).
+
 ### Left to do / how to continue
 1. **User to re-test on webcam** — expect ~25-30 FPS, a reading in ~3-4 s, and boxes
    on forehead+cheeks. If `--neural` still stutters, move neural inference

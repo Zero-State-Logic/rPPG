@@ -36,7 +36,7 @@ fusion, a live system) toward our own paper.
 | Near/far, moving | **Working, degrades honestly** | Quality label drops; HR holds through motion. |
 | HR accuracy | **Neural 1.17 bpm**; classical 8-subj **2.78 bpm, 93% within±5** (median 1.6; subj17 outlier 10.3) | 6/8 classical subjects <2 bpm; neural (held-out) is tighter. |
 | Harmonic/jump robustness | **Fixed** | HRTracker rejects 2× harmonic + spikes, holds through motion. |
-| Blood pressure | **Experimental only** | Heuristic + single-point calibration. NOT validated. |
+| Blood pressure | **Trained model** (contact PPG): SBP 15.1 MAE (BHS-D), DBP 6.5 (BHS-C) | Live via `--bp-model`; rough on rPPG (domain gap); still experimental. Heuristic fallback. |
 | Neural model (ProPOSNet) | **Real UBFC: 1.17 bpm MAE** (Pearson 0.95), **live** | Trained on 8 real subjects; runs live via `--neural`; beats classical 1.41. |
 | Classical/deep training pipeline | **Working** | Subject-independent + cross-dataset; CPU local, GPU on Colab. |
 | Real UBFC data | **4 subjects downloaded** | Via Kaggle per-file to `C:\rppg_data\UBFC`; more available (C: ~10 GB free). |
