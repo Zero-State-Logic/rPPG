@@ -46,6 +46,21 @@ Research (Workflow, 3 agents + synthesis) then sequential implementation agents
   dataclass was left untouched (selection state lives in the arbiter). Functionally
   tested: neural default, switches to steadier classical, falls back when neural absent.
 
+### Audit (full-code error hunt, same session)
+- `python -m compileall` clean; **pyflakes** found one issue — a forward-ref local
+  annotation `nn_hr: "NeuralReading | None"` in `live_demo.py` (harmless at runtime,
+  Python skips local annotations, but cleaned). Now pyflakes exit 0.
+- **End-to-end run on a real face video** (subject10, 150 frames) through the EXACT
+  `main()` loop with neural + BP model + illumination-norm + arbiter + overlay: **zero
+  exceptions**. Overlay correctly hides the neural line until finite (no "ProPOSNet
+  nan" on screen).
+- **Illumination-norm accuracy check**: raw ROI vs illum-normalized gave **identical**
+  classical HR (90.7 vs 90.7 bpm, err 0.7 vs GT 91.4) on steady light — the filter is
+  harmless when light is constant and only acts on real swings. No silent degradation.
+- Non-bugs noted: neural needs ~160 frames (~5 s @30fps, longer at low FPS) before
+  "main: ProPOSNet" shows — until then the arbiter correctly keeps classical ProPOS;
+  `_background_rgb` doesn't exclude faces sitting in the frame corners (minor; flag-gated).
+
 ### Left to do / how to continue
 1. **User to re-test on webcam** (face the camera, front light):
    `.venv\Scripts\python.exe scripts\live_demo.py --neural` — the main number reads
