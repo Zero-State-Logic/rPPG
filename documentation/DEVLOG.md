@@ -7,6 +7,26 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 
 ---
 
+## 2026-10-18 — Robustness: SNR, cheek ROI, light filtering, dual-source main reading
+
+### Plan (intent / decisions)
+- User requests: (1) improve pulse **SNR** and make the **trained neural (ProPOSNet)**
+  reading the main/front number; (2) fix the **cheek ROI** boxes (too narrow + catching
+  the nose, skewing the colour signal); (3) **filter sudden ambient-light changes /
+  optical interference** for stable readings (median / Hampel / Kalman / adaptive);
+  (4) continuously compare **ProPOS vs the neural** source and auto-select the more
+  stable / less-noisy one as the MAIN displayed reading.
+- **Decision — multi-agent research first** (Workflow: SNR+light filtering, cheek ROI,
+  dual-source selection), then implement the synthesis conservatively.
+- Direction: default main = neural, auto-switch to classical ProPOS when it is clearly
+  more stable; a robust per-frame optical-noise filter + illumination normalization;
+  wider, laterally-shifted cheek ROIs anchored off the nose landmark.
+
+### Done (accomplished / results)
+- _pending — filled in after the research synthesis is implemented and tested._
+
+---
+
 ## 2026-10-13 — Demo professionalization (FPS, forehead/cheek ROI, latency)
 
 ### Plan (intent / decisions)
