@@ -167,7 +167,7 @@ def main() -> None:
     last_est: dict[int, float] = {}
     last_nn: dict[int, float] = {}
     readings: dict[int, Reading] = {}
-    nn_hr: dict[int, "NeuralReading | None"] = {}   # trained ProPOSNet reading per track
+    nn_hr: dict = {}   # track id -> NeuralReading | None (trained ProPOSNet reading)
     subj_nums: dict[int, int] = {}  # track id -> stable 1-based "Subj N" label
     fps = 0.0
     prev = time.time()
