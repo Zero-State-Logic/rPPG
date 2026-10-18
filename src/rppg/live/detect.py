@@ -35,7 +35,10 @@ _DIM_LUMA = 90.0          # below this mean brightness, lift the DETECTION frame
 # Forehead + cheek ROI geometry, in multiples of inter-ocular distance (landmarks).
 _FOREHEAD_UP = 0.60       # forehead centre sits this * iod above the eye line
 _FOREHEAD_W, _FOREHEAD_H = 1.00, 0.45
-_CHEEK_W, _CHEEK_H = 0.45, 0.60
+_CHEEK_W, _CHEEK_H = 0.65, 0.55   # wide over the malar bone, short to clear lid/mouth
+_CHEEK_DROP = 0.50                # cheek centre sits this fraction of eye->mouth below eye
+_NOSE_MARGIN = 0.22               # medial edge kept this * iod clear of the nose x
+                                  # (clears the nostril ala; skin mask can't drop nose px)
 
 _MAX_MISSED = 15      # drop a track after this many consecutive unseen frames
 _MATCH_FACTOR = 0.6   # a detection matches a track within this * face-width pixels
@@ -73,10 +76,10 @@ def _rois_from_box(box: tuple[int, int, int, int], frame_w: int,
     x, y, w, h = box
     forehead = _clamp_roi(int(x + 0.30 * w), int(y + 0.07 * h),
                           int(0.40 * w), int(0.13 * h), frame_w, frame_h)
-    r_cheek = _clamp_roi(int(x + 0.12 * w), int(y + 0.52 * h),
-                         int(0.24 * w), int(0.20 * h), frame_w, frame_h)
-    l_cheek = _clamp_roi(int(x + 0.64 * w), int(y + 0.52 * h),
-                         int(0.24 * w), int(0.20 * h), frame_w, frame_h)
+    r_cheek = _clamp_roi(int(x + 0.08 * w), int(y + 0.50 * h),
+                         int(0.28 * w), int(0.22 * h), frame_w, frame_h)
+    l_cheek = _clamp_roi(int(x + 0.64 * w), int(y + 0.50 * h),
+                         int(0.28 * w), int(0.22 * h), frame_w, frame_h)
     return (forehead, r_cheek, l_cheek)
 
 
@@ -88,7 +91,7 @@ def _rois_from_landmarks(lm: np.ndarray, box: tuple[int, int, int, int],
     Landmark order: [0]=right eye, [1]=left eye, [2]=nose, [3]=right mouth corner,
     [4]=left mouth corner ("right"/"left" are the subject's own sides).
     """
-    re, le, _, rm, lm_ = lm[0], lm[1], lm[2], lm[3], lm[4]
+    re, le, nose, rm, lm_ = lm[0], lm[1], lm[2], lm[3], lm[4]
     iod = math.hypot(le[0] - re[0], le[1] - re[1])
     if not math.isfinite(iod) or iod < _MIN_IOD:
         return _rois_from_box(box, frame_w, frame_h)
@@ -99,14 +102,28 @@ def _rois_from_landmarks(lm: np.ndarray, box: tuple[int, int, int, int],
     ux, uy = ey, -ex                                        # perpendicular ("up")
     if ux * (mouth_cx - eye_cx) + uy * (mouth_cy - eye_cy) > 0:  # point away from mouth
         ux, uy = -ux, -uy
+    dx, dy = -ux, -uy                                       # "down", toward the mouth
 
     forehead = _rect_center(eye_cx + ux * _FOREHEAD_UP * iod,
                             eye_cy + uy * _FOREHEAD_UP * iod,
                             _FOREHEAD_W * iod, _FOREHEAD_H * iod, frame_w, frame_h)
-    r_cheek = _rect_center((re[0] + rm[0]) / 2.0, (re[1] + rm[1]) / 2.0,
-                           _CHEEK_W * iod, _CHEEK_H * iod, frame_w, frame_h)
-    l_cheek = _rect_center((le[0] + lm_[0]) / 2.0, (le[1] + lm_[1]) / 2.0,
-                           _CHEEK_W * iod, _CHEEK_H * iod, frame_w, frame_h)
+
+    # Cheeks: start under each eye, slide halfway down toward the mouth along the
+    # face's own vertical axis, then build a wide malar patch. The medial (inner)
+    # edge is clamped to the nose landmark x so the box can never creep onto the
+    # nose/nostril (assumes a roughly upright head: subject's right eye at smaller
+    # x). Lateral + below-eye placement follows the malar-region guidance in the
+    # rPPG literature (low skin density, small surface-reflection angle).
+    drop = _CHEEK_DROP * math.hypot(mouth_cx - eye_cx, mouth_cy - eye_cy)
+    half_w = _CHEEK_W * iod / 2.0
+    gap = _NOSE_MARGIN * iod
+    rcx, rcy = re[0] + dx * drop, re[1] + dy * drop
+    lcx, lcy = le[0] + dx * drop, le[1] + dy * drop
+    rcx = min(rcx, nose[0] - gap - half_w)   # right-cheek inner edge <= nose_x - gap
+    lcx = max(lcx, nose[0] + gap + half_w)   # left-cheek  inner edge >= nose_x + gap
+
+    r_cheek = _rect_center(rcx, rcy, _CHEEK_W * iod, _CHEEK_H * iod, frame_w, frame_h)
+    l_cheek = _rect_center(lcx, lcy, _CHEEK_W * iod, _CHEEK_H * iod, frame_w, frame_h)
     return (forehead, r_cheek, l_cheek)
 
 
