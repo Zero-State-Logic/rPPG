@@ -31,7 +31,8 @@ fusion, a live system) toward our own paper.
 
 | Capability | State | Notes |
 |---|---|---|
-| Live webcam HR, 1 person | **Working** | Classical ProPOS + POS/CHROM fusion + HR tracker. |
+| Live webcam HR, 1 person | **Working** | Neural-default main + auto ProPOS fallback (arbiter); POS/CHROM/ProPOS fusion + HR tracker; Hampel spike filter + background illumination normalization. |
+| Sudden-light / optical-noise robustness | **Working** | Per-frame illumination normalization (background division) + Hampel spike filter on the trace. |
 | Live webcam HR, multiple people | **Working** | YuNet multi-face + per-person tracker. |
 | Near/far, moving | **Working, degrades honestly** | Quality label drops; HR holds through motion. |
 | HR accuracy | **Neural 1.17 bpm**; classical 8-subj **2.78 bpm, 93% within±5** (median 1.6; subj17 outlier 10.3) | 6/8 classical subjects <2 bpm; neural (held-out) is tighter. |

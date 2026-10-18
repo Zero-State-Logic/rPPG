@@ -23,7 +23,36 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
   wider, laterally-shifted cheek ROIs anchored off the nose landmark.
 
 ### Done (accomplished / results)
-- _pending — filled in after the research synthesis is implemented and tested._
+Research (Workflow, 3 agents + synthesis) then sequential implementation agents
+(Workflow), each tested; orchestrator verified + committed. **All 29 tests pass**
+(26 + 3 new Hampel tests) plus headless pipeline / arbiter / detector checks.
+- **Cheek ROI fixed** (`detect.py`): anchored under each eye, dropped onto the malar
+  bone, widened to 0.65×0.55 iod, medial edge **hard-clamped off the nose landmark**
+  (nose pixels can't be skin-masked out, so the clamp is the real fix). Geometry
+  unit-checked; detector still 30/30 on a real face.
+- **SNR + sudden-light filtering:**
+  - **Illumination normalization** (`live_demo._background_rgb`): per-frame divide of
+    the skin ROI RGB by a four-corner background reference → cancels global ambient
+    swings (light on/off, shadow sweep). `--no-illum-norm` disables. Biggest SNR lever.
+  - **Hampel spike filter** (`estimate._hampel`): sliding median + MAD on the resampled
+    trace removes flash/dropout spikes without distorting the pulse (beats
+    moving-average / plain-median / Kalman per the research).
+- **Neural-as-main + auto ProPOS fallback** (`neural.NeuralReading`, new
+  `select.SourceArbiter`, `live_demo.py`, `overlay.py`): the trained ProPOSNet HR is
+  the big main number; a per-track arbiter scores both sources by stability (HR jitter)
+  + SNR + agreement and **auto-switches the main to classical ProPOS when it is clearly
+  steadier** (3-vote hysteresis), snapping back when neural recovers. Overlay shows the
+  selected source big with a `main: ProPOSNet/ProPOS` tag, the other small. The Reading
+  dataclass was left untouched (selection state lives in the arbiter). Functionally
+  tested: neural default, switches to steadier classical, falls back when neural absent.
+
+### Left to do / how to continue
+1. **User to re-test on webcam** (face the camera, front light):
+   `.venv\Scripts\python.exe scripts\live_demo.py --neural` — the main number reads
+   ProPOSNet, switching to ProPOS when steadier; cheek boxes off the nose; steady HR
+   through a light flick.
+2. Optional: move neural inference off-thread for higher FPS with `--neural`; add a unit
+   test for the cheek nose-clamp; re-measure HR MAE with the new ROI + illumination norm.
 
 ---
 
