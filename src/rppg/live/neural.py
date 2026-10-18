@@ -9,6 +9,7 @@ alongside the classical ProPOS estimate.
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
 
 import cv2
 import numpy as np
@@ -20,6 +21,15 @@ from ..models.proposnet import ProPOSNet
 _T = 160          # clip length used in training (train_deep --chunk-len default)
 _RESIZE = 72
 _EPS = 1e-7
+
+
+@dataclass(frozen=True)
+class NeuralReading:
+    """A trained-ProPOSNet heart-rate readout with its spectral SNR (both from
+    the same sub-bin peak the classical path uses, so the two are comparable)."""
+
+    hr: float
+    snr: float
 
 
 class NeuralHR:
@@ -43,8 +53,8 @@ class NeuralHR:
         self._buf.setdefault(face_id, deque(maxlen=self.clip_len * 2)).append(
             (timestamp, rgb))
 
-    def estimate(self, face_id: int) -> float | None:
-        """Neural HR (bpm) for a face, or None until enough frames are buffered."""
+    def estimate(self, face_id: int) -> NeuralReading | None:
+        """Neural HR + SNR for a face, or None until enough frames are buffered."""
         buf = self._buf.get(face_id)
         if not buf or len(buf) < self.clip_len:
             return None
@@ -59,8 +69,8 @@ class NeuralHR:
         x = torch.from_numpy(std.transpose(3, 0, 1, 2)[None]).float()  # (1,3,T,H,W)
         with torch.no_grad():
             pulse = self.model(x)[0].cpu().numpy()
-        hr, _ = hr_peak_interp(bandpass(pulse, fps), fps)
-        return hr if np.isfinite(hr) else None
+        hr, snr = hr_peak_interp(bandpass(pulse, fps), fps)
+        return NeuralReading(float(hr), float(snr)) if np.isfinite(hr) else None
 
     def prune(self, live_ids: set[int]) -> None:
         """Forget buffers whose faces are no longer tracked."""

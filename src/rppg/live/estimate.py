@@ -145,6 +145,29 @@ class HRTracker:
         return self.hr
 
 
+def _hampel(x, half, n_sigma=3.0):
+    """Replace point outliers in ``x`` with the local median (Hampel filter).
+
+    Slides a ``2*half+1`` window over the 1-D trace, flags samples that sit more
+    than ``n_sigma`` robust std-devs (MAD-scaled) from the window median, and
+    swaps each flagged sample for its local median. This removes sudden optical
+    noise spikes (lighting flicker, specular glints) without smearing the pulse,
+    since in-band samples are left untouched. Buffers too short for a full window
+    are returned unchanged.
+    """
+    n = x.size
+    if n < 2 * half + 1:
+        return x
+    pad = np.pad(x, half, mode="edge")
+    win = np.stack([pad[i:i + n] for i in range(2 * half + 1)], axis=0)
+    med = np.median(win, axis=0)
+    sigma = 1.4826 * np.median(np.abs(win - med), axis=0)
+    out = x.copy()
+    bad = np.abs(x - med) > (n_sigma * sigma)
+    out[bad] = med[bad]
+    return out
+
+
 class PersonSignal:
     """Rolling ROI-colour buffer for one tracked face -> HR/BP readings."""
 
@@ -172,7 +195,10 @@ class PersonSignal:
         n = len(self._samples)
         grid = np.linspace(ts[0], ts[-1], n)
         trace = np.stack([np.interp(grid, ts, rgb[c]) for c in range(3)], axis=0)
-        return trace, (n - 1) / span
+        fps = (n - 1) / span
+        half = max(2, int(round(0.2 * fps)))
+        trace = np.stack([_hampel(trace[c], half) for c in range(3)], axis=0)
+        return trace, fps
 
     def estimate(self, calib: Calibration, bp_model=None) -> Reading:
         """Compute the current reading; ``ready`` False until enough signal exists.

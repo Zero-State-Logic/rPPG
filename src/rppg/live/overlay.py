@@ -13,6 +13,7 @@ import numpy as np
 
 from .detect import Track
 from .estimate import Reading
+from .select import Decision
 
 _GOOD = (90, 220, 120)
 _FAIR = (60, 200, 240)
@@ -63,14 +64,17 @@ def _text(frame: np.ndarray, s: str, org: tuple[int, int], scale: float,
 
 
 def draw_face(frame: np.ndarray, track: Track, reading: Reading,
-              bp_tag: str = "exp", nn_hr: float | None = None,
+              bp_tag: str = "exp", decision: Decision | None = None,
               subj_num: int | None = None) -> None:
     """Draw one person's box, ROI, readings and pulse sparkline.
 
     ``bp_tag`` labels the BP number -- ``"exp"`` (uncalibrated heuristic) or
-    ``"cal"`` once single-point calibration has been applied. ``nn_hr``, when
-    given, adds the trained ProPOSNet heart-rate line below the classical one.
-    ``subj_num`` is the stable 1-based person label ("Subj 1", "Subj 2", ...).
+    ``"cal"`` once single-point calibration has been applied. ``decision``, when
+    given (a :class:`~rppg.live.select.Decision`), drives the headline HR from the
+    arbiter-selected source, names which source leads (``main: ProPOSNet`` /
+    ``main: ProPOS``) and shows the other source's HR below it; when ``None`` the
+    overlay behaves as before, using ``reading.hr``. ``subj_num`` is the stable
+    1-based person label ("Subj 1", "Subj 2", ...).
     """
     x, y, w, h = track.det.box
     color, qlabel = _quality(reading)
@@ -81,7 +85,7 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
         cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), _ACCENT, 1)
 
     panel_w = max(w, 168)
-    panel_h = 86 if (reading.ready and nn_hr is not None) else 70
+    panel_h = 100 if (reading.ready and decision is not None) else 70
     py = y - panel_h - 6
     if py < 2:
         py = y + h + 6
@@ -90,16 +94,21 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
     cv2.rectangle(frame, (px, py), (px + panel_w, py + panel_h), color, 1)
 
     if reading.ready:
-        hr_txt = f"~{reading.hr:0.0f}" if reading.provisional else f"{reading.hr:0.0f}"
+        hr_val = decision.hr if decision is not None else reading.hr
+        hr_txt = f"~{hr_val:0.0f}" if reading.provisional else f"{hr_val:0.0f}"
         _text(frame, f"{name}  {hr_txt} bpm", (px + 8, py + 22), 0.6, _TEXT, 1)
         _text(frame, f"BP {reading.bp_sys:0.0f}/{reading.bp_dia:0.0f} {bp_tag}",
               (px + 8, py + 42), 0.48, (180, 210, 255), 1)
         _text(frame, f"{qlabel}  SNR {reading.snr:0.1f}dB", (px + 8, py + 60),
               0.42, color, 1)
         _sparkline(frame, reading.pulse, px + panel_w - 60, py + 8, 54, 20, color)
-        if nn_hr is not None:
-            _text(frame, f"ProPOSNet {nn_hr:0.0f} bpm", (px + 8, py + 79), 0.44,
+        if decision is not None:
+            main_label = "ProPOSNet" if decision.main == "neural" else "ProPOS"
+            _text(frame, f"main: {main_label}", (px + 8, py + 78), 0.44,
                   (120, 230, 200), 1)
+            if np.isfinite(decision.other_hr):
+                _text(frame, f"{decision.other_label} {decision.other_hr:0.0f} bpm",
+                      (px + 8, py + 94), 0.42, (190, 200, 210), 1)
     else:
         _text(frame, name, (px + 8, py + 22), 0.6, _TEXT, 1)
         _text(frame, qlabel, (px + 8, py + 46), 0.5, _IDLE, 1)

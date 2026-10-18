@@ -28,6 +28,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from rppg.live.detect import CentroidTracker, YuNetDetector  # noqa: E402
 from rppg.live.estimate import Calibration, Reading, SignalBank  # noqa: E402
 from rppg.live.overlay import draw_face, draw_header  # noqa: E402
+from rppg.live.select import SourceArbiter  # noqa: E402
 
 _WINDOW = "rPPG live"
 _EST_EVERY = 0.4   # seconds between classical re-estimates per person
@@ -72,6 +73,21 @@ def _pooled_skin_rgb(frame: np.ndarray, rois) -> np.ndarray | None:
     return None
 
 
+def _background_rgb(frame, boxes, frac=0.14):
+    h, w = frame.shape[:2]
+    bw, bh = int(w * frac), int(h * frac)
+    patches = [frame[0:bh, 0:bw], frame[0:bh, w - bw:w], frame[h - bh:h, 0:bw], frame[h - bh:h, w - bw:w]]
+    acc = np.zeros(3, dtype=np.float64)
+    n = 0
+    for p in patches:
+        if p.size:
+            acc += p.reshape(-1, 3).sum(axis=0)
+            n += p.shape[0] * p.shape[1]
+    if n == 0:
+        return None
+    return (acc / n)[::-1]
+
+
 def _open_camera(index: int, width: int, height: int,
                  lock_exposure: bool) -> cv2.VideoCapture:
     """Open a webcam, prefer DirectShow on Windows, disable auto white balance."""
@@ -99,6 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="do not mirror the frame (mirror is on by default)")
     ap.add_argument("--lock-exposure", action="store_true",
                     help="lock camera exposure for the cleanest signal (needs light)")
+    ap.add_argument("--no-illum-norm", action="store_true",
+                    help="disable background illumination normalization")
     ap.add_argument("--ref-sbp", type=float, default=120.0,
                     help="reference systolic BP for single-point calibration (key 'c')")
     ap.add_argument("--ref-dbp", type=float, default=80.0,
@@ -127,6 +145,7 @@ def main() -> None:
     detector = YuNetDetector()
     tracker = CentroidTracker()
     bank = SignalBank()
+    arbiter = SourceArbiter()   # picks the main HR source (neural vs classical)
     calib = Calibration()
     calibrated = False
     neural = None
@@ -148,7 +167,7 @@ def main() -> None:
     last_est: dict[int, float] = {}
     last_nn: dict[int, float] = {}
     readings: dict[int, Reading] = {}
-    nn_hr: dict[int, float | None] = {}
+    nn_hr: dict[int, "NeuralReading | None"] = {}   # trained ProPOSNet reading per track
     subj_nums: dict[int, int] = {}  # track id -> stable 1-based "Subj N" label
     fps = 0.0
     prev = time.time()
@@ -164,6 +183,7 @@ def main() -> None:
             now = time.time()
 
             tracks = tracker.update(detector.detect(frame))
+            bg = None if args.no_illum_norm else _background_rgb(frame, [t.det.box for t in tracks])
             live_ids = set()
             neural_ids: set[int] = set()
             if neural is not None and tracks:
@@ -180,24 +200,35 @@ def main() -> None:
                     subj_nums[tr.id] = n
                 rgb = _pooled_skin_rgb(frame, tr.det.rois)
                 if rgb is not None:
+                    if bg is not None:
+                        rgb = rgb / np.maximum(bg, 1.0)   # normalize out ambient-light swings
                     bank.add(tr.id, now, rgb)   # forehead + cheeks, skin-pooled
                 if tr.id in neural_ids:
                     bx, by, bw, bh = tr.det.box
                     face_crop = frame[by:by + bh, bx:bx + bw]
                     if face_crop.size:
                         neural.add(tr.id, now, face_crop)  # net trained on face frames
+                fresh_c = False
+                fresh_n = False
                 if now - last_est.get(tr.id, 0.0) >= _EST_EVERY:
                     readings[tr.id] = bank.estimate(tr.id, calib, bp_model)
                     last_est[tr.id] = now
+                    fresh_c = True
                 if tr.id in neural_ids and now - last_nn.get(tr.id, 0.0) >= _NN_EVERY:
                     nn_hr[tr.id] = neural.estimate(tr.id)
                     last_nn[tr.id] = now
+                    fresh_n = True
+                decision = arbiter.update(
+                    tr.id, readings.get(tr.id, Reading(False, 0.0)),
+                    nn_hr.get(tr.id) if tr.id in neural_ids else None,
+                    fresh_c, fresh_n)
                 bp_tag = "cal" if calibrated else ("mdl" if bp_model else "exp")
                 draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
                           bp_tag=bp_tag,
-                          nn_hr=nn_hr.get(tr.id) if tr.id in neural_ids else None,
+                          decision=decision,
                           subj_num=subj_nums[tr.id])
             bank.prune(live_ids)
+            arbiter.prune(live_ids)
             if neural is not None:
                 neural.prune(live_ids)
             for gone in [tid for tid in subj_nums if tid not in live_ids]:
