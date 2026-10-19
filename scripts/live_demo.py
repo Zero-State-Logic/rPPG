@@ -111,6 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--camera", type=int, default=0, help="camera index")
     ap.add_argument("--width", type=int, default=960)
     ap.add_argument("--height", type=int, default=540)
+    ap.add_argument("--detector", choices=["yunet", "mediapipe"], default="yunet",
+                    help="face detector: yunet (default, fast) or mediapipe "
+                         "(478-point mesh, higher precision; falls back to yunet)")
     ap.add_argument("--no-flip", action="store_true",
                     help="do not mirror the frame (mirror is on by default)")
     ap.add_argument("--lock-exposure", action="store_true",
@@ -129,6 +132,19 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _build_detector(name: str):
+    """Build the chosen detector; fall back to YuNet if MediaPipe is unavailable."""
+    if name == "mediapipe":
+        try:
+            from rppg.live.mediapipe_detect import MediaPipeDetector
+            detector = MediaPipeDetector()
+            print("[detector] MediaPipe FaceLandmarker (478-point mesh)")
+            return detector
+        except Exception as exc:  # noqa: BLE001 - any failure should fall back
+            print(f"[detector] MediaPipe unavailable ({exc}); using YuNet")
+    return YuNetDetector()
+
+
 def main() -> None:
     args = build_parser().parse_args()
     cap = _open_camera(args.camera, args.width, args.height, args.lock_exposure)
@@ -142,7 +158,7 @@ def main() -> None:
           f"reported_fps={cap.get(cv2.CAP_PROP_FPS):.0f}  "
           f"(low light forces long exposure -> low FPS; use bright, white light)")
 
-    detector = YuNetDetector()
+    detector = _build_detector(args.detector)
     tracker = CentroidTracker()
     bank = SignalBank()
     arbiter = SourceArbiter()   # picks the main HR source (neural vs classical)
@@ -190,6 +206,7 @@ def main() -> None:
                 nearest = sorted(tracks, key=lambda t: t.det.box[2] * t.det.box[3],
                                  reverse=True)[:_NN_MAX_FACES]
                 neural_ids = {t.id for t in nearest}
+            frame_dt = now - prev   # real time since last frame, for the gate dwell timers
             for tr in tracks:
                 live_ids.add(tr.id)
                 if tr.id not in subj_nums:          # assign the lowest free number
@@ -221,7 +238,7 @@ def main() -> None:
                 decision = arbiter.update(
                     tr.id, readings.get(tr.id, Reading(False, 0.0)),
                     nn_hr.get(tr.id) if tr.id in neural_ids else None,
-                    fresh_c, fresh_n)
+                    fresh_c, fresh_n, dt=frame_dt)
                 bp_tag = "cal" if calibrated else ("mdl" if bp_model else "exp")
                 draw_face(frame, tr, readings.get(tr.id, Reading(False, 0.0)),
                           bp_tag=bp_tag,

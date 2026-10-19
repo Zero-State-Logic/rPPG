@@ -73,19 +73,32 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
     given (a :class:`~rppg.live.select.Decision`), drives the headline HR from the
     arbiter-selected source, names which source leads (``main: ProPOSNet`` /
     ``main: ProPOS``) and shows the other source's HR below it; when ``None`` the
-    overlay behaves as before, using ``reading.hr``. ``subj_num`` is the stable
+    overlay behaves as before, using ``reading.hr``. When the decision fails the
+    hard confidence gate (``decision.trusted`` is False) the box, border and panel
+    turn red and show a "signal too weak" warning in place of the HR/BP/SNR lines,
+    so a weak/artifact pulse is never shown as a number. ``subj_num`` is the stable
     1-based person label ("Subj 1", "Subj 2", ...).
     """
     x, y, w, h = track.det.box
     color, qlabel = _quality(reading)
     name = f"Subj {subj_num}" if subj_num is not None else f"P{track.id}"
+    # Gate only the COMMITTED headline. A provisional ("~X acquiring") reading is
+    # already self-hedged, so it is shown through the warm-up instead of flashing
+    # "signal too weak" for the first seconds of every face before the gate latches.
+    gated = (reading.ready and not reading.provisional
+             and decision is not None and not decision.trusted)
+    if gated:
+        color = _POOR   # weak/untrustworthy pulse -> red box, border and warning
 
     cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
     for rx, ry, rw, rh in track.det.rois:   # forehead + both cheeks
         cv2.rectangle(frame, (rx, ry), (rx + rw, ry + rh), _ACCENT, 1)
 
     panel_w = max(w, 168)
-    panel_h = 100 if (reading.ready and decision is not None) else 70
+    if gated:
+        panel_h = 70
+    else:
+        panel_h = 100 if (reading.ready and decision is not None) else 70
     py = y - panel_h - 6
     if py < 2:
         py = y + h + 6
@@ -93,7 +106,13 @@ def draw_face(frame: np.ndarray, track: Track, reading: Reading,
     cv2.rectangle(frame, (px, py), (px + panel_w, py + panel_h), _PANEL, -1)
     cv2.rectangle(frame, (px, py), (px + panel_w, py + panel_h), color, 1)
 
-    if reading.ready:
+    if gated:
+        # Hard confidence gate tripped: suppress the (misleading) HR / BP / SNR /
+        # main / other-source lines and tell the viewer how to recover a usable
+        # pulse instead of showing an artifact rate.
+        _text(frame, f"{name}  signal too weak", (px + 8, py + 28), 0.54, _POOR, 1)
+        _text(frame, "hold still / add light", (px + 8, py + 52), 0.46, _POOR, 1)
+    elif reading.ready:
         hr_val = decision.hr if decision is not None else reading.hr
         hr_txt = f"~{hr_val:0.0f}" if reading.provisional else f"{hr_val:0.0f}"
         _text(frame, f"{name}  {hr_txt} bpm", (px + 8, py + 22), 0.6, _TEXT, 1)
