@@ -7,6 +7,27 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 
 ---
 
+## 2026-10-19 — MediaPipe precision landmarks + hard confidence gate + robustness
+
+### Plan (intent / decisions)
+- User wants: (1) switch the live face landmarks to **MediaPipe FaceLandmarker**
+  (478-point mesh, highest precision) for precise forehead/cheek ROIs; (2) a **hard
+  confidence gate** — show "signal too weak" instead of a misleading number when SNR
+  is low (dim / motion / flicker); (3) propose + apply **further robustness
+  improvements** ("best in any condition", within physical limits).
+- **De-risk done**: MediaPipe 1.1.0 Tasks FaceLandmarker confirmed working here
+  (478 landmarks/face, num_faces=3, VIDEO mode) on a real face.
+- **Decision — multi-agent research then implement** (user preference). Keep YuNet as
+  a fallback behind a `--detector` flag; route the gate through overlay/arbiter without
+  touching the Reading dataclass where possible.
+- Honest stance: no algorithm gives reliable rPPG in dim + harsh-flicker + motion; the
+  confidence gate is the correct answer there (say "weak" rather than fake a number).
+
+### Done (accomplished / results)
+- _pending._
+
+---
+
 ## 2026-10-18 — Robustness: SNR, cheek ROI, light filtering, dual-source main reading
 
 ### Plan (intent / decisions)
