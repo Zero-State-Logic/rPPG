@@ -48,12 +48,17 @@ _W_STAB, _W_SNR, _W_AGREE = 0.5, 0.3, 0.2   # confidence blend weights
 # discriminator, since an artifact lock (the strongest leftover low-freq component when
 # there is no real pulse) can itself carry a modest positive SNR but makes the two
 # independent methods disagree.
-_SNR_ENTER = 0.5       # dB: classical-SNR floor to START trusting (~74% of clean ticks)
-_SNR_EXIT = -1.5       # dB: SNR this low (while trusted) marks a dead-signal frame
-_ENTER_SEC = 1.5       # s of net-good signal (leaky) before the HR is shown
+# A live webcam is noisier than the clean subject10 reference, so the enter floor
+# sits below 0 dB and the dwell is short, to LATCH a real face quickly rather than
+# withhold it; the exit floor is well below the enter floor (asymmetric Schmitt
+# hysteresis) so a locked reading holds through a normal SNR dip instead of flickering
+# between a number and the warning.
+_SNR_ENTER = -1.0      # dB: classical-SNR floor to START trusting a live face
+_SNR_EXIT = -3.5       # dB: SNR this low (while trusted) marks a dead-signal frame
+_ENTER_SEC = 1.0       # s of net-good signal (leaky) before the HR is shown
 _EXIT_SEC = 1.5        # s of net-bad signal (leaky) before trust is dropped
 _AGREE_BPM = 12.0      # bpm: neural/classical must agree within this (clean face p90~9)
-_EDGE_HR_MIN = 48.0    # bpm: reject near-edge locks at/below this as implausible
+_EDGE_HR_MIN = 42.0    # bpm: reject near-edge locks at/below this as implausible
 _HR_LO, _HR_HI = 40.0, 180.0   # plausible live heart-rate window (bpm)
 
 
