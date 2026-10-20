@@ -27,8 +27,8 @@ from ..methods.classical.pos import pos_pulse
 from ..methods.classical.propos import propos_pulse
 
 _WINDOW_SEC = 10.0      # rolling buffer length used for each estimate
-_MIN_SEC = 1.0          # show a provisional ("acquiring") reading this early
-_LOCK_SEC = 4.0         # readings before this stay provisional, then they lock
+_MIN_SEC = 3.0          # no number before a ~3s window can resolve bpm (<3s unreliable)
+_LOCK_SEC = 8.0         # provisional "~" until an ~8s window has filled (stability flag)
 _PLOT_SAMPLES = 160     # trailing pulse samples handed to the overlay plot
 
 # HR tracker: reject 2nd-harmonic locks, rate-limit jumps, hold through motion.
@@ -39,6 +39,13 @@ _CONFIRM = 3                     # confident agreeing readings needed to jump re
 _ALPHA_STRONG, _ALPHA_WEAK = 0.35, 0.15   # smoothing rates by confidence
 _HARMONIC_TOL = 12.0             # bpm window for spotting a 2x-current harmonic
 _FIRST_LOCK_SNR = -2.0           # accept the first HR lock once SNR clears this (dB)
+
+# Display stabiliser: rolling median -> EMA -> slew clamp on the COMMITTED bpm, so the
+# on-screen number is steady. SOTA readouts show a smoothed bpm time-series, never the
+# raw per-window FFT peak; a genuine HR change still fully appears within ~7-10 s.
+_DISP_MEDIAN_N = 5               # rolling-median width over recent committed HRs
+_DISP_ALPHA = 0.2                # EMA weight on the new median (keep ~80% of previous)
+_DISP_SLEW = 2.5                 # max bpm the displayed HR may move per estimate
 
 # Experimental BP heuristic anchors (see module docstring -- NOT validated).
 _SBP0, _DBP0, _HR0 = 118.0, 76.0, 70.0
@@ -145,6 +152,37 @@ class HRTracker:
         return self.hr
 
 
+class DisplayStabilizer:
+    """Rolling median + EMA + slew clamp for a steady on-screen heart rate.
+
+    The tracker still does lock / harmonic-fold / confirmation on the raw estimate;
+    this is the final *presentation* smoother so the number the user reads does not
+    twitch. The median kills single-window spikes and harmonic flips, the EMA adds
+    inertia, and the slew clamp bounds per-update motion -- a real HR change still
+    fully appears within a few seconds while noise cannot jump the number.
+    """
+
+    def __init__(self, median_n: int = _DISP_MEDIAN_N, alpha: float = _DISP_ALPHA,
+                 slew: float = _DISP_SLEW) -> None:
+        self._buf: deque[float] = deque(maxlen=median_n)
+        self._ema: float | None = None
+        self._alpha = alpha
+        self._slew = slew
+
+    def update(self, hr: float) -> float | None:
+        """Fold one committed HR into the smoothed display value (held on NaN input)."""
+        if not np.isfinite(hr):
+            return self._ema
+        self._buf.append(float(hr))
+        med = float(np.median(self._buf))
+        if self._ema is None:
+            self._ema = med
+        else:
+            target = self._ema + self._alpha * (med - self._ema)
+            self._ema += float(np.clip(target - self._ema, -self._slew, self._slew))
+        return self._ema
+
+
 def _hampel(x, half, n_sigma=3.0):
     """Replace point outliers in ``x`` with the local median (Hampel filter).
 
@@ -174,6 +212,7 @@ class PersonSignal:
     def __init__(self, window_sec: float = _WINDOW_SEC) -> None:
         self._samples: deque[tuple[float, np.ndarray]] = deque()
         self._tracker = HRTracker()
+        self._display = DisplayStabilizer()
         self._window = window_sec
 
     def add(self, timestamp: float, rgb: np.ndarray) -> None:
@@ -233,6 +272,13 @@ class PersonSignal:
             hr, provisional = hr_raw, True   # early provisional, before a clean lock
         else:
             return Reading(ready=False, seconds=seconds)
+
+        # Final presentation smoothing: a steady on-screen number (median -> EMA ->
+        # slew), applied to provisional and locked readings alike so the raw per-window
+        # peak is never shown directly. This is the direct fix for a jittery readout.
+        smoothed = self._display.update(hr)
+        if smoothed is not None and np.isfinite(smoothed):
+            hr = smoothed
         best = max(scored, key=lambda s: s[3] if np.isfinite(s[3]) else -1e9)
         best_pulse = best[1]
         sbp = dbp = float("nan")
