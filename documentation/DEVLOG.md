@@ -7,6 +7,69 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 
 ---
 
+## 2026-10-29 — Flagship novelty: Certified Abstention for camera HR (paper-first)
+
+### Plan (intent / decisions)
+- User wants a **novelty worthy of an IEEE international publication that also wins a
+  hackathon**. Method: multi-agent research — 4 candidate directions, each a prior-art
+  search **plus an adversarial skeptic**; a field gap survey; an open brainstorm; and a
+  synthesis grounded in our own measured data.
+- **Verified landscape:** all four directions survive only *with a narrowed claim*. The
+  closest abstention work is Liao et al., *Nature* 2026 (Google; smartphone camera HR,
+  entropy cutoff tuned to skin-tone equity rules — no guarantee, no no-pulse
+  calibration). Also Cali-rPPG (ICIC 2025), Song et al. (IEEE TIM 2023),
+  RF-BayesPhysNet (2025), rPPG-VQA (CVPR 2026), Speth et al. (BIOSIGNALS 2023,
+  hallucinated heartbeats), Kateri (PhD thesis, Southampton 2025, conformal rPPG). The
+  field survey ranks "no validated way to know when not to report an HR" as open
+  problem #1.
+- **Decision (user):** flagship = **Certified Abstention for Camera Heart Rate** —
+  selection-aware, frequency-conditional no-pulse calibration + a physics-consistency
+  score + subject-level risk control, wrapping any estimator. **Breathe-to-Verify**
+  (paced-breathing liveness) is a hackathon demo extra only. **Paper-first**; no fixed
+  hackathon date.
+- **Headline, reproduced independently** (no-pulse input = the 4-corner background
+  trace of each cached subject, 237 × 10 s windows, exact live classical pipeline):
+  median SNR POS −4.50 dB, CHROM −4.48, ProPOS −2.47, fused −1.96 dB. The live −1 dB gate
+  passes **35.0%** of no-pulse windows (POS alone 4.2%). **97.9%** of the hallucinated
+  rates fall in 42–180 bpm, **median 56.3 bpm** — the mechanism behind the live "45–60
+  bpm that varies". Best-of-candidates selection inflates no-pulse SNR by about
+  +2.5 dB (difference of medians, fused − POS).
+- **Do NOT claim:** first conformal rPPG (Kateri 2025); first no-pulse evaluation
+  (Speth 2023); first model-agnostic confidence wrapper (Cali-rPPG 2025); novelty of
+  agreement / ROI / chroma cues; risk-coverage reporting by itself. **Report** that
+  ProPOS's 50-basis search drives most of the inflation (a property of
+  max-over-projections designs).
+- **Constraints (measured 2026-10-29):** E: 0.24 GB free, C: 3.35 GB free. With 7–8
+  subjects no useful certificate exists (minimum certifiable α ≈ 0.28 at δ = 0.1);
+  ≥30 subjects → α ≈ 0.074. Needs (user decisions/actions) freeing the ~14.4 GB raw
+  UBFC videos *after* cache v2 + face crops are extracted, streaming more UBFC subjects,
+  and recording ~50–100 no-pulse clips (printed photo / phone screen / mannequin — no
+  human subjects). `best.pt` was trained on these same 8 subjects → subject-disjoint
+  retraining before any ProPOSNet evaluation.
+
+### Done (accomplished / results)
+- **Foundation committed:** `documentation/ARCHITECTURE.md` (dac0b7b); frame cache
+  `src/rppg/eval/frame_cache.py` + `windows.py` + `scripts/build_frame_cache.py`, 11 tests
+  (c95692d); window-level reliability table `src/rppg/eval/window_table.py` +
+  `scripts/build_window_table.py`, 4 tests (0ab03e1). Full suite: **52 passed**.
+- Cache for subjects 10–17 at `C:/rppg_data/cache` (100% face detection). Fused HR MAE
+  per subject (10 s / 2 s): 0.51, 0.82, 0.88, 0.35, 1.52, **26.85** (s15), 0.52, 1.72 bpm;
+  237 windows, 18 failing (>10 bpm), 15 from subject15. subject15 is an estimator
+  failure, not bad ground truth (contact PPG and oximeter agree at ~110–121 bpm while
+  the estimate locks onto ~48–58 bpm).
+- **Pilot (read-only; cues chosen after seeing the data, so optimistic):** AUROC for
+  flagging failing windows, pooled (within subject15): SNR 0.958 (0.822), method spread
+  0.953 (0.822), ROI spread 0.844 (0.569), ROI-median gap 0.828 (0.844), **2×-harmonic
+  ratio 0.853 (0.862)**. Pooled risk-coverage (SNR ranking): MAE 4.19 → 0.95 bpm at 80%
+  coverage. A threshold calibrated on 7 subjects fails on the atypical one: subject15
+  accepted 83–93% of windows with 40–46% wrong.
+- _Next:_ reliability package (cues / null / score / certify / metrics / baselines),
+  live-faithful offline preprocessing, cache v2 + crops, a dated pre-registration,
+  Phase 0 experiments, null-clip recording, subject expansion, then the live certified
+  gate and the Breathe-to-Verify demo.
+
+---
+
 ## 2026-10-19 — MediaPipe precision landmarks + hard confidence gate + robustness
 
 ### Plan (intent / decisions)
@@ -24,7 +87,29 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
   confidence gate is the correct answer there (say "weak" rather than fake a number).
 
 ### Done (accomplished / results)
-- _pending._
+- **MediaPipe 478-mesh detector** (`--detector mediapipe`, YuNet fallback): real-face
+  check gave 3 valid ROIs with cheeks on opposite sides of the nose (2756b3b).
+- **Confidence gate — sub-agent thresholds were wrong and were caught:** `_SNR_ENTER`
+  3.0 dB sat near a clean face's *peak* SNR and the gate scored the neural SNR (max
+  ~2.1 dB), so it never trusted subject10. Re-derived from measured subject10
+  distributions (classical SNR median 1.7 dB; neural/classical agree within ~9 bpm
+  p90) → trusts subject10 at 7.5 s on both detectors (2756b3b). Later retuned less
+  restrictive for live webcams: enter −1.0 dB / exit −3.5 dB, 1.0 s dwell, edge 42 bpm
+  → trusts subject10 at **5.6 s**, HR 99.6 vs ~97 (0baaaea).
+- **Display stabilizer** (median-5 → EMA 0.2 → 2.5 bpm/update slew; first number at 3 s,
+  lock at 8 s): subject10 HR 97.5, locked std 2.61 bpm, **max consecutive jump 0.85 bpm**
+  (was up to the 8 bpm tracker slew) (5ae9e25).
+- **FAILED — autonomous motion-robustness build reverted:** polygon ROIs + per-ROI
+  fusion + bounded peak tracking + signal-absent detector passed 96 unit tests but on a
+  real face regressed HR **97 → 54 bpm** (splitting into small per-ROI samples lost the
+  spatial averaging; `roi_agree` was 0 on every window) and the signal-absent detector
+  false-fired on **38/38** clean-face windows (flatness/entropy thresholds guessed; real
+  face flatness 0.48–0.99, entropy 0.78–0.99). Stashed as `stash@{0}`
+  ("wip-s1-s4-broken-integration"); `quality.py` / `oneeuro.py` there are salvageable.
+- **Lesson:** every signal-path change must pass a real-face HR-accuracy check, not just
+  unit tests.
+- Left: honest state-machine overlay; motion work that re-pools good ROIs instead of
+  estimating per tiny ROI. Superseded in priority by the 2026-10-29 flagship.
 
 ---
 

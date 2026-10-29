@@ -38,9 +38,11 @@ fusion, a live system) toward our own paper.
 | HR accuracy | **Neural 1.17 bpm**; classical 8-subj **2.78 bpm, 93% within±5** (median 1.6; subj17 outlier 10.3) | 6/8 classical subjects <2 bpm; neural (held-out) is tighter. |
 | Harmonic/jump robustness | **Fixed** | HRTracker rejects 2× harmonic + spikes, holds through motion. |
 | Blood pressure | **Trained model** (contact PPG): SBP 15.1 MAE (BHS-D), DBP 6.5 (BHS-C) | Live via `--bp-model`; rough on rPPG (domain gap); still experimental. Heuristic fallback. |
-| Neural model (ProPOSNet) | **Real UBFC: 1.17 bpm MAE** (Pearson 0.95), **live** | Trained on 8 real subjects; runs live via `--neural`; beats classical 1.41. |
+| Neural model (ProPOSNet) | **Real UBFC: 1.17 bpm MAE** (Pearson 0.95), **live** | Trained on 8 real subjects; runs live via `--neural`; beats classical 1.41. `best.pt` saw these same 8 subjects → retrain subject-disjoint before using it in the reliability study. |
 | Classical/deep training pipeline | **Working** | Subject-independent + cross-dataset; CPU local, GPU on Colab. |
-| Real UBFC data | **4 subjects downloaded** | Via Kaggle per-file to `C:\rppg_data\UBFC`; more available (C: ~10 GB free). |
+| Real UBFC data | **8 subjects (10–17) local** | Raw videos ~14.4 GB in `C:\rppg_data\UBFC`; C: 3.35 GB / E: 0.24 GB free (2026-10-29). Expansion needs freeing the raw videos after cache v2 + crops. |
+| Offline research cache | **Working** | Frame cache + window table (`src/rppg/eval/`) at `C:\rppg_data\cache`: 237 × 10 s windows; per-subject fused MAE 0.35–1.72 bpm except subject15 26.85 (estimator locks at ~48–58 vs true ~110–121). |
+| Reliability / abstention (**flagship**) | **Research in progress** | Legacy live gate (−1 dB) accepts **35.0%** of no-pulse windows; the fake rates are 97.9% plausible, median 56.3 bpm. Flagship: *Certified Abstention for Camera HR* (DEVLOG 2026-10-29). |
 | BP datasets | **Not obtained** | Academic agreements (weeks); request emails drafted. |
 
 ## 3. Repository map
@@ -143,15 +145,22 @@ agreements, weeks out; best published camera-BP is ~±8–12 mmHg and not clinic
 - **Subject-independent** splits (no subject in two splits) and **cross-dataset**
   ("uneven data") — `splits.py`.
 - Metrics: MAE (bpm), RMSE, within-±5 bpm %, Pearson r, SNR — `hr/metrics.py`,
-  `eval/deep_eval.py`. 26 unit tests pass.
+  `eval/deep_eval.py`. **52 unit tests pass** (2026-10-29).
+- Reliability study (flagship): subjects are the exchangeable unit (leave-subject-out
+  now; 200+ random subject splits once ≥40 subjects); risk-coverage curves, AURC,
+  selective MAE at fixed coverage, per-subject yield and risk, null false-accept rate
+  with Clopper-Pearson CIs. The cue set, α0, α, δ, τ and the bin rule are
+  pre-registered in a dated file before any new data.
 
 ## 10. Constraints (hard realities)
 
 - **No local GPU** (Intel UHD) → deep training on Colab/Kaggle GPU, or slow CPU.
 - **Colab** free runtime **times out on inactivity** and wipes `/content` → fragile
   for long jobs.
-- **Local disk tight**: E: ~6.7 GB free, C: ~19 GB — the full 28 GB UBFC will not
-  fit; must fetch a **subset** of subjects.
+- **Local disk very tight (2026-10-29): E: 0.24 GB, C: 3.35 GB free.** The 8 raw UBFC
+  videos use ~14.4 GB on C:. Keep data artifacts on C:; free the raw videos only after
+  cache v2 + face crops are extracted (user decision), then stream further subjects one
+  at a time (download → cache → delete).
 - **Credentials**: assistant must not type the user's secret token; the user sets
   it, tooling reads it from `~/.kaggle/access_token` (KGAT) or env.
 - **Live rPPG physics**: ≤3 bpm is achievable only in good conditions; motion /
@@ -159,22 +168,44 @@ agreements, weeks out; best published camera-BP is ~±8–12 mmHg and not clinic
 
 ## 11. Roadmap / remaining work
 
-1. **Real UBFC**: download a few subjects via Kaggle (token now set) → measure
-   **real HR MAE** (the publishable number).
-2. **Train ProPOSNet on real faces** → checkpoint → wire a second neural HR readout
-   into the live demo.
-3. **Multi-ROI + skin masking** (forehead + both cheeks) for extra live SNR.
-4. **Distance** and **motion** robustness ladders (roadmap phases).
-5. **BP datasets** → real BP model.
-6. **Paper**: ProPOSNet + fusion + live system; benchmark table vs PhysNet/TS-CAN.
+Done since the original roadmap: real UBFC HR measured (8 subjects); ProPOSNet trained
+on real faces and running live; multi-ROI (forehead + cheeks) skin-pooled sampling;
+display stabilizer and a recalibrated confidence gate.
+
+**Flagship — Certified Abstention for Camera HR (paper-first, DEVLOG 2026-10-29):**
+1. Reliability package `src/rppg/reliability/`: cues, selection-aware
+   frequency-conditional null calibration, physics-consistency score, subject-level
+   certificate (Learn-then-Test / conformal risk control), metrics and baselines —
+   with tests, including simulation checks that the guarantees actually hold.
+2. Offline preprocessing identical to the live `PersonSignal` path (resample, Hampel,
+   background division), so calibration and deployment match.
+3. Cache v2 (separate corners, side and clothing patches, per-ROI sub-patches) + face
+   crops, built while the raw videos still exist.
+4. Dated pre-registration, then Phase 0 experiments on the 8 subjects (LOSO).
+5. Null clips: ~50–100 no-pulse recordings (printed photo / phone screen / mannequin;
+   static, flicker, hand motion; several lightings) — a team action, no human subjects.
+6. Subject expansion to ≥30–40 UBFC subjects (stream-and-discard), then LGI-PPGI /
+   UBFC-Phys / CHILL subsets for distribution shift.
+7. Subject-disjoint ProPOSNet retraining; wrap it with the same calibration.
+8. Live certified gate with reason codes + a legacy-vs-certified A/B demo; the
+   Breathe-to-Verify paced-breathing demo as an extra.
+9. Papers: EMBC / IEEE SPL from Phase 0 + negative controls; IEEE TIM / JBHI after the
+   expansion and cross-dataset tests.
+
+Other tracks (lower priority): BP datasets → real BP model; distance / motion ladders.
 
 ## 12. Known gaps & risks
 
-- Neural + classical both validated on real UBFC (1.17 / 1.41 bpm) but on only 8
-  subjects — more subjects would strengthen the numbers and the held-out test.
+- **The legacy live gate is biased by selection:** best-of-candidates SNR inflates
+  no-pulse windows by ~2.5 dB, so the −1 dB gate accepts 35% of no-pulse windows.
+  ProPOS's 50-basis search is the largest contributor (30.8% on its own vs POS 4.2%).
+- **Small n:** 8 subjects, 18 failing windows, 15 of them from subject15 — the pilot
+  numbers are optimistic until confirmed on pre-registered new subjects, and no useful
+  certificate is possible below ~30 subjects.
+- **Leakage:** `best.pt` was trained on the same 8 subjects.
 - BP unvalidated — present as experimental only.
-- Single mid-face ROI can be noisy; multi-ROI not yet implemented.
-- Motion / distance robustness still the research frontier (quality degrades honestly).
+- Motion / distance robustness is still the research frontier (quality degrades
+  honestly); UBFC subjects sit still, so motion methods cannot be validated on UBFC.
 
 ## 13. How to run
 
