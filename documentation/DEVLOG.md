@@ -7,6 +7,142 @@ repo-root `CLAUDE.md`. Technical/status detail lives in [PROJECT.md](PROJECT.md)
 
 ---
 
+## 2026-11-12 — Heart-rate accuracy push on MCD-rPPG (proposals 1–4 + new directions)
+
+### Plan (intent / decisions)
+- **Why:** the external validation (2026-11-09/10, outside the repo in
+  `D:\rppg_eval`, report `D:\rppg_eval\report\RPPG_Validation_Report.docx`) put the
+  shipped live HR at **MAE 17.45 bpm** on MCD-rPPG frontal webcam (40 subjects, 80
+  recordings); published methods on MCD reach 2.82–4.86. What-if tests traced most of
+  the gap to the front end: the Hampel spike filter turns 10 Hz light flicker into
+  in-band junk, the background division adds noise, small ROIs are weak, and there is
+  no tracking across windows. User approved implementing proposals 1–4 and asked for
+  more ways to cut the error, as far as this CPU-only machine allows.
+- **Decision — honest protocol first.** All tuning happens on a *development* set (the
+  40 already-used subjects). A **fresh test set of 40 new MCD subjects** (never looked
+  at while tuning) is downloaded for the final number, so the reported gain is not
+  tuned on the people it is scored on. UBFC is re-checked for regressions.
+- **Decision — a fast bench before code changes.** Re-extract richer per-frame
+  features (each ROI separately, face box raw/skin-masked/inner, a patch grid, motion,
+  small face crops) once, then score many ideas offline in seconds. Only winners go
+  into `src/`.
+- **Directions to test:** (1) front end — ROI choice, skin masking, SNR-weighted patch
+  selection; (2) preprocessing — Hampel off / after band-pass, normalisation, detrend;
+  (3) pulse methods — POS/CHROM/ProPOS/LGI/OMIT/PBV/GREEN, POS sub-window length;
+  (4) spectrum — periodogram vs Welch, harmonic-sum scoring, band 42–180; (5) temporal
+  tracking — causal Viterbi / harmonic folding; (6) learned options feasible on CPU
+  (peak selector / small 1-D model) with subject-level CV; (7) the live loop itself
+  (tracker, display stabiliser, gate) replayed on the test set.
+- **Then implement** proposals 1–4 (+ any proven extras) in `src/rppg/live/` and
+  `scripts/live_demo.py` with tests first; keep the parked Phase-0 work untouched.
+- Blood pressure is out of scope here (stays experimental).
+
+### Notes while working
+- **Bench data:** `D:\rppg_eval\code\bench\extract.py` re-downloads MCD frontal videos
+  and stores ~20 colour signals per frame (live patches, whole box raw/skin/masked,
+  6×6 grid, landmarks, 36×36 crops). Dev = the 40 validation subjects (seed 0), test =
+  40 NEW subjects (seed 1, never used for tuning). Extraction is CPU-bound (YuNet ~55 ms/
+  frame under load); first run with 6 workers did ~0.9 recordings/min, restarted as two
+  parallel runs (dev 5 + test 3 workers). Dev videos kept (6.6 GB on D:), test videos
+  deleted after extraction (disk).
+- **Methods bench** (old dev features, whole face box, no Hampel/no division):
+  raw per-window peak MAE — POS 7.85 (42–180) / 8.35 (42–240), LGI 9.48, OMIT 9.52,
+  ProPOS 9.77, CHROM 10.40, GREEN 16.19, PBV 16.52. With the causal Viterbi tracker
+  POS reaches 4.24–4.30 (σ 3–4 bpm per 2 s); spectral fusions of several methods
+  (4.75–5.3) and harmonic-sum spectra were worse. Subject-held-out CV: **4.33 bpm**.
+  → POS alone + 42–180 bpm + tracker (proposals 3–4 confirmed).
+- **Literature scan (sub-agent):** the official MCD code scores one 20 s clip per video
+  with a raw periodogram (0.5–3.5 Hz) on both rPPG and PPG — not our 10 s/2 s windows —
+  so published 3.80 (POS) is not directly comparable; the final evaluation therefore
+  also reports that protocol. Grid/patch quality pruning (Face2PPG) and narrow-band
+  refinement were suggested; fusion/top-k patch selection did not beat plain skin
+  averaging in our smoke run.
+- **Implemented (TDD):** `src/rppg/hr/track.py` (`SpectralTracker`: online Viterbi on a
+  42–180 bpm, 1-bpm grid; evidence tempered by dt/2 s and random-walk variance ∝ dt so
+  0.4 s live updates don't over-count overlapping windows; sub-bin parabolic refine),
+  `PersonSignal` rewritten (no Hampel by default — `spike_filter=True` keeps the legacy
+  path; POS → spectrum → tracker; SNR = ±9 bpm around the tracked rate; optional
+  `stabilize`), `live_demo.py` `--roi face|face-skin|patches` (default whole face),
+  `--illum-norm` opt-in. The parked `tests/test_windows_live.py` mirrors the legacy
+  preprocessing, so it now asks for `spike_filter=True` explicitly.
+- **Live-loop replay on dev** (new code, whole box): any number on screen MAE **4.67**
+  (was 19.19); gate shows a number **62 %** of the time at **2.47 bpm** MAE, only
+  **3.7 %** of shown numbers off by >10 bpm (was 43.1 %). Gate thresholds unchanged.
+  SNR-threshold trade-off on dev: ≥−3 dB → 68 % coverage / 2.54 MAE; ≥0 dB → 40 % / 1.93.
+- **UBFC regression check** (8 local subjects, cache_v2 → bench format): 10 s windows
+  legacy 5.12 → new **1.26** bpm; live any 10.38 → **2.60**; committed 89 % at 2.07,
+  2.1 % off by >10. No regression on the original dataset.
+- **Buffer length / tracker σ** (dev, t = 20–90 s, ref = trailing 10 s): 10 s buffer
+  with σ 3 bpm is best (4.77); 8 s 4.94, 12 s 5.03, 15 s 5.72, 20 s 6.14 (longer
+  buffers lag the after-exercise HR drop). Keeps the current 10 s / σ 3 defaults.
+- **Face-region bench** (dev, all 80 recordings, 462 variants, sub-agent script
+  `exp_regions.py`): **skin pixels of the face box + POS + tracker σ 4 = 3.64 bpm**
+  (both CV folds pick it; held-out 3.64), raw box 4.48, face minus eyes/mouth 4.68,
+  inner box 4.66, legacy forehead+cheek skin pool 6.90, single forehead 10.1, single
+  cheeks 12.6–14.5. Paired vs raw box: −0.92 bpm (95 % CI −1.90 to −0.10), better in
+  32/40 subjects. Adaptive per-cell spectral fusion (SNR-weighted, softmax, top-k) was
+  far worse (~15 bpm): single 6×6 cells are too noisy. → default `--roi face-skin`,
+  tracker σ 4.
+- **Live replay with the final defaults** (dev, face skin, σ 4): any number on screen
+  **4.31** bpm; gate shows a number **72 %** of the time at **2.58** bpm, 3.8 % of
+  shown numbers off by >10 bpm (whole raw box was 62 % / 2.47 / 3.7 %).
+- **Neural retraining (ProPOSNet on MCD 36×36 face crops, sub-agent script
+  `bench/neural/train_mcd.py --final`):** 40 dev subjects, NegPearson + FreqMSE,
+  35 CPU-minutes (≈1,400 steps); NegPearson 0.77 → 0.58. Even **in-sample** the HR
+  error is 18.89 bpm (bias +12), far behind the classical 3.64 — the small net needs
+  much more training (GPU) than this machine allows. Scored on the held-out test set
+  below; not promoted to `artifacts/` unless it wins there. `--neural` stays optional.
+- **Speed:** extraction switched to YuNet on every 2nd frame (box held between) and
+  OpenCV-circle masks after 46 dev / 6 test recordings — ~2× faster. The neural
+  model is trained once on all dev subjects and scored only on the held-out test set
+  (no separate CV run) to save ~70 CPU-minutes.
+- **Code review (sub-agent, no CRITICAL/HIGH):** fixed three MEDIUM edge cases with
+  tests — a flat/constant input produced a fake 42 bpm (now "no evidence", not ready),
+  dt ≤ 0 re-counted the same window (now held), and a long gap now restarts the buffer
+  and the tracker; duplicate band/σ constants removed from `estimate.py`.
+
+### Done
+- **Held-out test (40 NEW MCD subjects, 80 frontal recordings, never used for
+  tuning; `D:\rppg_eval\bench\out\final_test.json`):**
+
+  | | Before (shipped) | After (new defaults) |
+  |---|---|---|
+  | HR error per 10 s window (MAE, 95 % CI) | 17.85 (15.23–20.52) | **3.85 (2.30–5.92)** |
+  | Within ±5 bpm (windows) | 42.7 % | 88.4 % |
+  | Live: number on screen, any tick | 17.69 | **3.92** |
+  | Live: share of time a number is shown | 57.7 % | **77.3 %** |
+  | Live: error of shown numbers | 14.89 | **2.00** (93.9 % within ±5) |
+  | Live: shown numbers off by >10 bpm | 43.3 % | **3.3 %** |
+
+  Paired improvement (per-subject bootstrap): windows 11.4–16.6 bpm, live 10.2–17.3.
+  Plain POS on the same face skin without tracking: 5.59. MCD's published 20 s-clip
+  protocol (their scoring code): POS on our face skin **2.19 bpm** (published POS
+  3.80, best model 2.82) — different subjects and face crop, so indicative only; the
+  live tracker's reading after just 20 s scores 4.48 under that protocol.
+  Neural ProPOSNet held-out: UBFC checkpoint 32.91 → MCD-retrained 20.62 (still far
+  behind; `--neural` not recommended with current checkpoints, nothing promoted).
+- **Project changes:** `src/rppg/hr/track.py` (new SpectralTracker), `src/rppg/live/
+  estimate.py` (POS + tracker, no Hampel by default, gap reset, flat-input guard),
+  `scripts/live_demo.py` (`--roi face-skin` default, `--illum-norm` opt-in),
+  `src/rppg/live/select.py` (comment: gate re-validated), tests
+  `test_spectral_track.py`, `test_live_estimate.py`, `test_live_demo_frontend.py`
+  (+ parked `test_windows_live.py` now asks for the legacy filter explicitly).
+  **456 tests pass.** Not committed — waiting for the owner's review.
+- **Report:** `D:\rppg_eval\report2\RPPG_Improvement_Report.docx` (built by
+  `report2\build_report.js` from the result JSONs; every step, data links, numbers).
+- **What is left / how:**
+  1. Owner reviews, then commit (`feat: whole-face POS + spectral tracker live HR`),
+     keeping the parked Phase-0 files out of that commit.
+  2. Field-test the demo on a real webcam: `.venv\Scripts\python.exe
+     scripts\live_demo.py` (defaults now face-skin + tracker); compare `--roi patches`.
+  3. Certified Abstention on top of the new SNR/tracker (flagship paper).
+  4. Neural: GPU-scale retraining on many MCD subjects (`bench\neural\train_mcd.py`),
+     or a small learned peak selector on POS spectra.
+  5. Motion / side-camera / fast after-exercise HR changes remain the weak cases
+     (RMSE ~13 shows a few recordings still fail).
+
+---
+
 ## 2026-10-29 — Flagship novelty: Certified Abstention for camera HR (paper-first)
 
 ### Plan (intent / decisions)

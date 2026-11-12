@@ -31,12 +31,13 @@ fusion, a live system) toward our own paper.
 
 | Capability | State | Notes |
 |---|---|---|
-| Live webcam HR, 1 person | **Working** | Neural-default main + auto ProPOS fallback (arbiter); POS/CHROM/ProPOS fusion + HR tracker; Hampel spike filter + background illumination normalization. |
-| Sudden-light / optical-noise robustness | **Working** | Per-frame illumination normalization (background division) + Hampel spike filter on the trace. |
+| Live webcam HR, 1 person | **Working (rebuilt 2026-11-12)** | Whole face box → POS → 42–180 bpm spectrum → causal **SpectralTracker** (`src/rppg/hr/track.py`); confidence gate unchanged. Neural main via `--neural` + arbiter as before. |
+| HR accuracy on an external dataset (MCD-rPPG, frontal webcam) | **Measured** | Before: 17.45 bpm per 10 s window, live number 19.19, 43 % of shown numbers off >10 bpm. After (dev, subject-held-out): 4.33 per window; live 4.67, shown 62 % of the time at 2.47, 3.7 % off >10. **Held-out 40 new subjects: 17.85 → 3.85 bpm per window; live shown numbers 14.89 → 2.00 bpm at 77 % coverage, off >10 bpm 43 % → 3.3 %** (DEVLOG 2026-11-12). |
+| Sudden-light / optical-noise robustness | **Reworked** | Hampel spike filter **removed by default** (it turned 10 Hz flicker into in-band junk; `PersonSignal(spike_filter=True)` keeps it); background division now opt-in (`--illum-norm`). The tracker rejects brief outliers instead. |
 | Live webcam HR, multiple people | **Working** | YuNet multi-face + per-person tracker. |
 | Near/far, moving | **Working, degrades honestly** | Quality label drops; HR holds through motion. |
 | HR accuracy | **Neural 1.17 bpm**; classical 8-subj **2.78 bpm, 93% within±5** (median 1.6; subj17 outlier 10.3) | 6/8 classical subjects <2 bpm; neural (held-out) is tighter. |
-| Harmonic/jump robustness | **Fixed** | HRTracker rejects 2× harmonic + spikes, holds through motion. |
+| Harmonic/jump robustness | **Fixed (tracker replaced 2026-11-12)** | SpectralTracker (online Viterbi, σ 3 bpm/2 s) ignores brief outlier windows and follows sustained changes; flat input → "not ready", never a fake rate. Old HRTracker kept for `eval_ubfc_fused.py`. |
 | Blood pressure | **Trained model** (contact PPG): SBP 15.1 MAE (BHS-D), DBP 6.5 (BHS-C) | Live via `--bp-model`; rough on rPPG (domain gap); still experimental. Heuristic fallback. |
 | Neural model (ProPOSNet) | **Real UBFC: 1.17 bpm MAE** (Pearson 0.95), **live** | Trained on 8 real subjects; runs live via `--neural`; beats classical 1.41. `best.pt` saw these same 8 subjects → retrain subject-disjoint before using it in the reliability study. |
 | Classical/deep training pipeline | **Working** | Subject-independent + cross-dataset; CPU local, GPU on Colab. |
@@ -51,7 +52,7 @@ fusion, a live system) toward our own paper.
 src/rppg/
   methods/classical/   pos.py chrom.py pbv.py propos.py   # signal-processing rPPG
   models/              proposnet.py physnet.py tscan.py losses.py  # deep models
-  hr/                  metrics.py  refine.py               # HR estimation + accuracy
+  hr/                  metrics.py  refine.py  track.py     # HR estimation, accuracy, tracking
   data/                datasets.py splits.py               # UBFC/PURE loaders, splits
   train/               trainer.py                          # training loop
   eval/                deep_eval.py                        # HR evaluation
@@ -90,13 +91,14 @@ models/      (gitignored) YuNet + MediaPipe face models, auto-downloaded
 webcam frame (OpenCV, auto-WB off, optional exposure lock)
   -> YuNet multi-face detection (detect.py)
   -> CentroidTracker: stable per-person id across frames
-  -> per face: mid-face ROI (cheeks/upper-lip) mean RGB -> rolling 10 s buffer
-  -> every 0.4 s per person (estimate.py):
-       resample buffer to uniform fps
-       POS + CHROM + ProPOS  ->  band-pass each (refine.bandpass)
-       sub-bin spectral peak each (refine.hr_peak_interp)  -> (hr, snr)
-       SNR fusion across methods (refine.fuse_estimates)   -> raw hr
-       HRTracker: 2nd-harmonic fold + slew-limit + confirm + motion-hold -> hr
+  -> per face: whole face-box mean RGB (--roi face; face-skin / legacy patches
+     selectable; background division only with --illum-norm) -> rolling 10 s buffer
+  -> every 0.4 s per person (estimate.py, since 2026-11-12):
+       resample buffer to uniform fps (no Hampel unless spike_filter=True)
+       POS pulse -> band-passed, Hann, zero-padded spectrum on a 42-180 bpm grid
+       SpectralTracker (hr/track.py): online Viterbi, evidence tempered by dt/2 s,
+         random walk sigma 3 bpm per 2 s, sub-bin refine -> hr
+       SNR = power within +/-9 bpm of hr vs rest of band (feeds the gate)
        experimental BP from hr + pulse morphology (+ optional calibration)
   -> overlay.py: per-person box, ROI, HR, BP(exp/cal), SNR, pulse sparkline
 ```
@@ -115,7 +117,16 @@ noise, harmonics or motion. Layers added:
    jump after `_CONFIRM` confident readings agree, and holds the last value when
    SNR is low (motion). Constants in `estimate.py`.
 
-**Measured:** synthetic sweep → MAE 0.20 bpm. **Real UBFC (4 subjects, 44 windows,
+**2026-11-12 rework (external MCD-rPPG validation).** Layers 3–4 above were replaced:
+multi-method fusion and the slew-limited `HRTracker` lost to **POS alone + a causal
+spectral Viterbi tracker** (`rppg.hr.track.SpectralTracker`), the band became 42–180
+bpm, the Hampel pre-filter and background division were switched off by default and
+the whole face box replaced the forehead/cheek patches. Bench and evidence:
+`D:\rppg_eval\code\bench\`, report `D:\rppg_eval\report2\RPPG_Improvement_Report.docx`.
+`HRTracker` / `DisplayStabilizer` remain for `scripts/eval_ubfc_fused.py` and the
+optional `PersonSignal(stabilize=True)`.
+
+**Measured (before the rework):** synthetic sweep → MAE 0.20 bpm. **Real UBFC (4 subjects, 44 windows,
 `scripts/eval_ubfc_fused.py`): MAE 1.41 bpm, RMSE 4.12, within±5 95%, within±3
 93%** — the ≤3 bpm target **met on real faces** (per subject 0.44 / 0.54 / 1.91 /
 2.77 bpm). Tracker unit-tested against 128-harmonic spikes, lone spikes, real
@@ -203,6 +214,14 @@ Other tracks (lower priority): BP datasets → real BP model; distance / motion 
   numbers are optimistic until confirmed on pre-registered new subjects, and no useful
   certificate is possible below ~30 subjects.
 - **Leakage:** `best.pt` was trained on the same 8 subjects.
+- **Neural path lags the classical path on new people** (MCD held-out: UBFC
+  `best.pt` 32.9 bpm, MCD-retrained 20.6 vs classical 3.85). `--neural` is not
+  recommended until it is retrained at GPU scale.
+- **Residual failures:** after the 2026-11-12 rework the MCD held-out RMSE is still
+  ~13 bpm — a few recordings fail (fast after-exercise HR changes, weak signal); the
+  confidence gate hides most of them (3.3 % of shown numbers off >10 bpm).
+- **Protocol note:** published MCD numbers use one 20 s clip per video; our main
+  metric is 10 s windows every 2 s, so compare like-for-like (both are reported).
 - BP unvalidated — present as experimental only.
 - Motion / distance robustness is still the research frontier (quality degrades
   honestly); UBFC subjects sit still, so motion methods cannot be validated on UBFC.

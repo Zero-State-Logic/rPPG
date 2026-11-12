@@ -73,6 +73,37 @@ def _pooled_skin_rgb(frame: np.ndarray, rois) -> np.ndarray | None:
     return None
 
 
+def _face_rgb(frame: np.ndarray, box, skin: bool = False) -> np.ndarray | None:
+    """Mean RGB of the whole face box (optionally only its YCrCb skin pixels).
+
+    Live front end since 2026-11-12 (default: the box's skin pixels). On MCD-rPPG dev
+    the skin of the whole box scored 3.64 bpm, the raw box 4.48 and the old
+    forehead/cheek patches 6.90 (POS + tracker). Returns None when the box is empty;
+    with ``skin`` it falls back to all box pixels if too few pass the gate.
+    """
+    h, w = frame.shape[:2]
+    x, y, bw, bh = (int(v) for v in box)
+    x0, y0, x1, y1 = max(0, x), max(0, y), min(w, x + bw), min(h, y + bh)
+    patch = frame[y0:y1, x0:x1]
+    if patch.size == 0:
+        return None
+    flat = patch.reshape(-1, 3).astype(np.float64)
+    if skin:
+        ycc = cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb)
+        mask = cv2.inRange(ycc, np.array(_SKIN_LO, np.uint8),
+                           np.array(_SKIN_HI, np.uint8)).ravel() > 0
+        if int(mask.sum()) >= _MIN_SKIN_PX:
+            flat = flat[mask]
+    return flat.mean(axis=0)[::-1]                 # BGR -> RGB
+
+
+def _roi_rgb(frame: np.ndarray, det, mode: str) -> np.ndarray | None:
+    """Colour sample for one face under front-end ``mode`` (face / face-skin / patches)."""
+    if mode == "patches":
+        return _pooled_skin_rgb(frame, det.rois)
+    return _face_rgb(frame, det.box, skin=(mode == "face-skin"))
+
+
 def _background_rgb(frame, boxes, frac=0.14):
     h, w = frame.shape[:2]
     bw, bh = int(w * frac), int(h * frac)
@@ -118,8 +149,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="do not mirror the frame (mirror is on by default)")
     ap.add_argument("--lock-exposure", action="store_true",
                     help="lock camera exposure for the cleanest signal (needs light)")
+    ap.add_argument("--roi", choices=["face", "face-skin", "patches"], default="face-skin",
+                    help="colour source: skin pixels of the face box (default), the whole "
+                         "box, or the legacy forehead+cheek patches")
+    ap.add_argument("--illum-norm", action="store_true",
+                    help="divide by the background-corner colour (off by default: it "
+                         "added noise on MCD-rPPG)")
     ap.add_argument("--no-illum-norm", action="store_true",
-                    help="disable background illumination normalization")
+                    help=argparse.SUPPRESS)   # legacy flag; normalisation is off by default
     ap.add_argument("--ref-sbp", type=float, default=120.0,
                     help="reference systolic BP for single-point calibration (key 'c')")
     ap.add_argument("--ref-dbp", type=float, default=80.0,
@@ -199,7 +236,8 @@ def main() -> None:
             now = time.time()
 
             tracks = tracker.update(detector.detect(frame))
-            bg = None if args.no_illum_norm else _background_rgb(frame, [t.det.box for t in tracks])
+            use_bg = args.illum_norm and not args.no_illum_norm
+            bg = _background_rgb(frame, [t.det.box for t in tracks]) if use_bg else None
             live_ids = set()
             neural_ids: set[int] = set()
             if neural is not None and tracks:
@@ -215,11 +253,11 @@ def main() -> None:
                     while n in used:
                         n += 1
                     subj_nums[tr.id] = n
-                rgb = _pooled_skin_rgb(frame, tr.det.rois)
+                rgb = _roi_rgb(frame, tr.det, args.roi)
                 if rgb is not None:
                     if bg is not None:
-                        rgb = rgb / np.maximum(bg, 1.0)   # normalize out ambient-light swings
-                    bank.add(tr.id, now, rgb)   # forehead + cheeks, skin-pooled
+                        rgb = rgb / np.maximum(bg, 1.0)   # optional ambient-light division
+                    bank.add(tr.id, now, rgb)
                 if tr.id in neural_ids:
                     bx, by, bw, bh = tr.det.box
                     face_crop = frame[by:by + bh, bx:bx + bw]

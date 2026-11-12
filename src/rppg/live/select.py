@@ -48,6 +48,10 @@ _W_STAB, _W_SNR, _W_AGREE = 0.5, 0.3, 0.2   # confidence blend weights
 # discriminator, since an artifact lock (the strongest leftover low-freq component when
 # there is no real pulse) can itself carry a modest positive SNR but makes the two
 # independent methods disagree.
+# Re-validated 2026-11-12 after the classical SNR changed to the tracked-rate SNR over
+# 42-180 bpm (rppg.live.estimate._spectrum_snr): with these unchanged thresholds the
+# replayed live loop on MCD-rPPG dev (40 subjects) shows a number 62 % of the time at
+# 2.47 bpm MAE, only 3.7 % of shown numbers off by >10 bpm (was 43 % before the fix).
 # A live webcam is noisier than the clean subject10 reference, so the enter floor
 # sits below 0 dB and the dwell is short, to LATCH a real face quickly rather than
 # withhold it; the exit floor is well below the enter floor (asymmetric Schmitt

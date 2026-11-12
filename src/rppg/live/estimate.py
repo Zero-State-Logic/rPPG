@@ -1,10 +1,17 @@
 """Per-person heart-rate (and an experimental blood-pressure proxy) from ROI colour.
 
-For every tracked face we keep a rolling buffer of ``(timestamp, mean ROI RGB)``
+For every tracked face we keep a rolling buffer of ``(timestamp, mean face RGB)``
 samples. On demand the buffer is resampled to a uniform time grid and turned into a
-pulse with the project's **ProPOS** method (``rppg.methods.classical.propos``), from
-which heart rate and SNR follow (``rppg.hr.metrics``). HR is median-smoothed over a
-few recent estimates so it stays steady while people move.
+pulse with **POS**; the pulse's 42-180 bpm spectrum is folded into a causal
+:class:`~rppg.hr.track.SpectralTracker` (online Viterbi), which gives the heart rate,
+and the SNR around that rate is reported for the confidence gate.
+
+Accuracy history (MCD-rPPG frontal webcam, 40 subjects, see documentation/DEVLOG.md
+2026-11-12): the earlier path -- Hampel spike filter, POS/CHROM/ProPOS SNR fusion over
+42-240 bpm and a slew-limited per-window peak -- scored 17.45 bpm MAE; POS + tracking
+on the face-box skin pixels scores 3.64 bpm (subject-held-out). The Hampel filter
+turned 10 Hz room-light flicker into fake in-band waves, so it is now off by default
+(``spike_filter=True`` restores it for legacy comparisons).
 
 Blood pressure here is an **experimental, uncalibrated proxy** -- a transparent
 heuristic over heart rate and pulse-harmonic morphology, NOT a validated
@@ -21,12 +28,13 @@ from dataclasses import dataclass, field
 import numpy as np
 from scipy.signal import periodogram
 
-from ..hr.refine import bandpass, fuse_estimates, hr_peak_interp
-from ..methods.classical.chrom import chrom_pulse
+from ..hr.refine import bandpass
+from ..hr.track import SpectralTracker, pulse_spectrum
 from ..methods.classical.pos import pos_pulse
-from ..methods.classical.propos import propos_pulse
 
 _WINDOW_SEC = 10.0      # rolling buffer length used for each estimate
+_SNR_HALF_BPM = 9.0     # +/- bpm counted as "signal" for the reported SNR (0.15 Hz)
+# Band (42-180 bpm) and tracker sigma come from rppg.hr.track's SpectralTracker defaults.
 _MIN_SEC = 3.0          # no number before a ~3s window can resolve bpm (<3s unreliable)
 _LOCK_SEC = 8.0         # provisional "~" until an ~8s window has filled (stability flag)
 _PLOT_SAMPLES = 160     # trailing pulse samples handed to the overlay plot
@@ -206,17 +214,43 @@ def _hampel(x, half, n_sigma=3.0):
     return out
 
 
-class PersonSignal:
-    """Rolling ROI-colour buffer for one tracked face -> HR/BP readings."""
+def _spectrum_snr(spec: np.ndarray, grid: np.ndarray, hr: float) -> float:
+    """SNR (dB) of a normalised band spectrum: power within +/-9 bpm of ``hr`` vs rest."""
+    if not np.isfinite(hr):
+        return float("nan")
+    near = np.abs(grid - hr) <= _SNR_HALF_BPM
+    sig = float(spec[near].sum())
+    noise = float(spec.sum()) - sig
+    return float(10.0 * np.log10((sig + 1e-12) / (noise + 1e-12)))
 
-    def __init__(self, window_sec: float = _WINDOW_SEC) -> None:
+
+class PersonSignal:
+    """Rolling face-colour buffer for one tracked face -> HR/BP readings.
+
+    ``spike_filter`` re-enables the legacy Hampel pre-filter (off by default: it
+    corrupts flicker-lit video); ``stabilize`` applies the presentation smoother
+    (:class:`DisplayStabilizer`) on top of the spectral tracker.
+    """
+
+    def __init__(self, window_sec: float = _WINDOW_SEC, spike_filter: bool = False,
+                 stabilize: bool = False) -> None:
         self._samples: deque[tuple[float, np.ndarray]] = deque()
-        self._tracker = HRTracker()
-        self._display = DisplayStabilizer()
+        self._tracker = SpectralTracker()
+        self._display = DisplayStabilizer() if stabilize else None
         self._window = window_sec
+        self._last_est_t: float | None = None
+        self.spike_filter = spike_filter
 
     def add(self, timestamp: float, rgb: np.ndarray) -> None:
-        """Append one mean-ROI RGB sample and drop anything older than the window."""
+        """Append one mean-ROI RGB sample and drop anything older than the window.
+
+        A gap longer than the window (face lost for a while) restarts the buffer and
+        the heart-rate tracker, so a stale track cannot pull the new reading.
+        """
+        if self._samples and timestamp - self._samples[-1][0] > self._window:
+            self._samples.clear()
+            self._tracker.reset()
+            self._last_est_t = None
         self._samples.append((timestamp, np.asarray(rgb, dtype=np.float64)))
         cutoff = timestamp - self._window
         while self._samples and self._samples[0][0] < cutoff:
@@ -235,8 +269,9 @@ class PersonSignal:
         grid = np.linspace(ts[0], ts[-1], n)
         trace = np.stack([np.interp(grid, ts, rgb[c]) for c in range(3)], axis=0)
         fps = (n - 1) / span
-        half = max(2, int(round(0.2 * fps)))
-        trace = np.stack([_hampel(trace[c], half) for c in range(3)], axis=0)
+        if self.spike_filter:
+            half = max(2, int(round(0.2 * fps)))
+            trace = np.stack([_hampel(trace[c], half) for c in range(3)], axis=0)
         return trace, fps
 
     def estimate(self, calib: Calibration, bp_model=None) -> Reading:
@@ -251,36 +286,26 @@ class PersonSignal:
             return Reading(ready=False, seconds=seconds)
         trace, fps = resampled
 
-        # Run three rPPG methods, band-pass each pulse, and fuse by SNR so the
-        # strongest-pulse method wins each instant (robust multi-method estimate).
-        pulses = {"pos": pos_pulse(trace, fps),
-                  "chrom": chrom_pulse(trace, fps),
-                  "propos": propos_pulse(trace, fps, do_fit=False)}
-        scored = []
-        for name, raw in pulses.items():
-            filt = bandpass(raw, fps)
-            hr_i, snr_i = hr_peak_interp(filt, fps)
-            scored.append((name, filt, hr_i, snr_i))
-        hr_raw, snr = fuse_estimates([(s[2], s[3]) for s in scored])
-        if not np.isfinite(hr_raw):
+        # POS pulse -> its 42-180 bpm spectrum -> causal spectral tracker. One bad
+        # window (flicker, motion) cannot pull the rate away; a real change is
+        # followed within a few seconds. dt = time since the previous estimate.
+        raw = pos_pulse(trace, fps)
+        grid = self._tracker.grid
+        spec = pulse_spectrum(raw, fps, grid)
+        now = self._samples[-1][0]
+        dt = now - self._last_est_t if self._last_est_t is not None else float("nan")
+        self._last_est_t = now
+        hr = self._tracker.update(spec, dt)
+        if not np.isfinite(hr):
             return Reading(ready=False, seconds=seconds)
+        snr = _spectrum_snr(spec, grid, hr)
+        provisional = seconds < _LOCK_SEC
 
-        tracked = self._tracker.update(hr_raw, snr)
-        if tracked is not None:
-            hr, provisional = tracked, seconds < _LOCK_SEC
-        elif _HR_MIN <= hr_raw <= _HR_MAX:
-            hr, provisional = hr_raw, True   # early provisional, before a clean lock
-        else:
-            return Reading(ready=False, seconds=seconds)
-
-        # Final presentation smoothing: a steady on-screen number (median -> EMA ->
-        # slew), applied to provisional and locked readings alike so the raw per-window
-        # peak is never shown directly. This is the direct fix for a jittery readout.
-        smoothed = self._display.update(hr)
-        if smoothed is not None and np.isfinite(smoothed):
-            hr = smoothed
-        best = max(scored, key=lambda s: s[3] if np.isfinite(s[3]) else -1e9)
-        best_pulse = best[1]
+        if self._display is not None:                   # optional presentation smoother
+            smoothed = self._display.update(hr)
+            if smoothed is not None and np.isfinite(smoothed):
+                hr = smoothed
+        best_pulse = bandpass(raw, fps, grid[0] / 60.0, grid[-1] / 60.0)
         sbp = dbp = float("nan")
         if bp_model is not None:
             pred = bp_model.predict(best_pulse, fps)
